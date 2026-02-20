@@ -1,10 +1,21 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
 export default function Home() {
-  const [monthIndex, setMonthIndex] = useState(new Date().getMonth());
-  const [year, setYear] = useState(new Date().getFullYear());
+const [monthIndex, setMonthIndex] = useState(new Date().getMonth());
+const [year, setYear] = useState(new Date().getFullYear());
+const [darkMode, setDarkMode] = useState(false);
+const [isMounted, setIsMounted] = useState(false);
+useEffect(() => {
+  const saved = localStorage.getItem("darkMode");
 
+  if (saved === "true") {
+    document.documentElement.classList.add("dark");
+    setDarkMode(true);
+  }
+
+  setIsMounted(true);
+}, []);
 const [selectedDay, setSelectedDay] = useState(null);
 const [incomes, setIncomes] = useState({});
 const [incomeName, setIncomeName] = useState("");
@@ -30,6 +41,8 @@ const [variableCategory, setVariableCategory] = useState("podroze");
 const [openDays, setOpenDays] = useState({});
 const [dailyView, setDailyView] = useState("list");
 const [quickAmount, setQuickAmount] = useState("");
+const sectionRefs = useRef({});
+const calendarWeekRef = useRef(null);
 
 useEffect(() => {
   const savedIncomes = localStorage.getItem("incomes");
@@ -52,6 +65,18 @@ useEffect(() => {
 useEffect(() => {
   localStorage.setItem("variableExpenses", JSON.stringify(variableExpenses));
 }, [variableExpenses]);
+
+useEffect(() => {
+  if (!isMounted) return;
+
+  if (darkMode) {
+    document.documentElement.classList.add("dark");
+  } else {
+    document.documentElement.classList.remove("dark");
+  }
+
+  localStorage.setItem("darkMode", darkMode);
+}, [darkMode, isMounted]);
 
   const months = [
     "Styczeń",
@@ -298,24 +323,25 @@ const totalExpenses = totalFixed + totalVariable;
 const balance = totalIncome - totalExpenses;
 
   return (
-    <main className="min-h-screen bg-gray-100 p-6">
+<main className="min-h-screen bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 p-6 transition-colors">
       <div className="max-w-3xl mx-auto space-y-6">
 
-  <div className="bg-white rounded-xl shadow p-4">
-  <div className="grid grid-cols-[80px_1fr_120px] items-center">
+  <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-4">
+  <div className="grid grid-cols-[80px_1fr_auto] items-center">
 
     {/* LEWA STRZAŁKA */}
     <div className="flex justify-start">
 <button
   onClick={previousMonth}
   className="group w-11 h-11 flex items-center justify-center rounded-full
-             bg-gradient-to-br from-gray-100 to-gray-200
-             shadow-md hover:shadow-lg
-             active:scale-95
-             transition-all duration-200"
+           bg-gradient-to-br from-gray-100 to-gray-200
+           dark:from-gray-700 dark:to-gray-600
+           shadow-md hover:shadow-lg
+           active:scale-95
+           transition-all duration-200"
 >
   <svg
-    className="w-5 h-5 text-gray-700 group-hover:-translate-x-1 transition-transform duration-200"
+    className="w-5 h-5 text-gray-700 dark:text-gray-200 group-hover:-translate-x-1 transition-transform duration-200"
     fill="none"
     stroke="currentColor"
     strokeWidth="2.5"
@@ -336,13 +362,14 @@ const balance = totalIncome - totalExpenses;
 <button
   onClick={nextMonth}
   className="group w-11 h-11 flex items-center justify-center rounded-full
-             bg-gradient-to-br from-gray-100 to-gray-200
-             shadow-md hover:shadow-lg
-             active:scale-95
-             transition-all duration-200"
+           bg-gradient-to-br from-gray-100 to-gray-200
+           dark:from-gray-700 dark:to-gray-600
+           shadow-md hover:shadow-lg
+           active:scale-95
+           transition-all duration-200"
 >
   <svg
-    className="w-5 h-5 text-gray-700 group-hover:translate-x-1 transition-transform duration-200"
+    className="w-5 h-5 text-gray-700 dark:text-gray-200 group-hover:translate-x-1 transition-transform duration-200"
     fill="none"
     stroke="currentColor"
     strokeWidth="2.5"
@@ -352,24 +379,44 @@ const balance = totalIncome - totalExpenses;
   </svg>
 </button>
 
-      <button
-        onClick={() => {
-          if (confirm("Na pewno wyczyścić cały miesiąc?")) {
-            clearMonth();
-          }
-        }}
-        className="w-11 h-11 flex items-center justify-center rounded-full 
-                   bg-red-100 hover:bg-red-200 shadow 
-                   transition active:scale-95"
-        title="Wyczyść miesiąc"
-      >
-        🗑
-      </button>
+<button
+  onClick={() => {
+    if (confirm("Na pewno wyczyścić cały miesiąc?")) {
+      clearMonth();
+    }
+  }}
+  className="w-11 h-11 flex items-center justify-center rounded-full
+             bg-red-100 hover:bg-red-200
+             dark:bg-red-900 dark:hover:bg-red-800
+             transition-all duration-200 active:scale-95"
+>
+  <svg
+    className="w-6 h-6 text-red-600 dark:text-red-300"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    viewBox="0 0 24 24"
+  >
+    <path
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      d="M6 7h12M9 7V5h6v2m-7 0v12m4-12v12m4-12v12M5 7h14l-1 14H6L5 7z"
+    />
+  </svg>
+</button>
+{isMounted && (
+  <button
+    onClick={() => setDarkMode(!darkMode)}
+    className="ml-2 px-3 py-1 rounded bg-gray-200 dark:bg-gray-700"
+  >
+    {darkMode ? "☀️" : "🌙"}
+  </button>
+)}
     </div>
 
   </div>
 </div>
-        <div className="bg-white rounded-xl shadow p-6 space-y-2">
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-6 space-y-2">
   <h2 className="text-xl font-semibold">Bilans miesiąca</h2>
 
   <div className="flex justify-between">
@@ -394,11 +441,11 @@ const balance = totalIncome - totalExpenses;
   </div>
 </div>
 
-<div className="bg-white rounded-xl shadow overflow-hidden">
+<div className="bg-white dark:bg-gray-800 rounded-xl shadow overflow-hidden">
   <button
     type="button"
     onClick={() => setOpenIncome(!openIncome)}
-    className="w-full text-left px-6 py-4 bg-gray-100 hover:bg-gray-200 flex justify-between items-center"
+    className="w-full text-left px-6 py-4 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 flex justify-between items-center transition-colors"
   >
     <span className="text-xl font-semibold">
       Przychody
@@ -409,7 +456,7 @@ const balance = totalIncome - totalExpenses;
   </button>
 
   {openIncome && (
-    <div className="p-6 space-y-4 bg-white">
+    <div className="p-6 space-y-4 bg-white dark:bg-gray-800">
 
       <form
         onSubmit={(e) => {
@@ -467,7 +514,7 @@ const balance = totalIncome - totalExpenses;
   )}
 </div>
 
- <div className="bg-white rounded-xl shadow p-6 space-y-4">
+ <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-6 space-y-4">
   <h2 className="text-xl font-semibold">
     Wydatki stałe — {totalFixed.toFixed(2)} zł
   </h2>
@@ -486,10 +533,20 @@ const balance = totalIncome - totalExpenses;
         {/* PRZYCISK */}
         <button
           type="button"
-          onClick={() =>
-            setOpenFixedCategory(isOpen ? null : key)
-          }
-          className="w-full text-left px-4 py-3 bg-gray-100 hover:bg-gray-200 flex justify-between items-center"
+onClick={() => {
+  const newState = isOpen ? null : key;
+  setOpenFixedCategory(newState);
+
+  if (!isOpen) {
+    setTimeout(() => {
+      sectionRefs.current[key]?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    }, 100);
+  }
+}}
+          className="w-full text-left px-6 py-4 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 flex justify-between items-center transition-colors"
         >
           <span className="font-semibold">
             {label}
@@ -501,7 +558,10 @@ const balance = totalIncome - totalExpenses;
 
         {/* ROZWINIĘCIE */}
         {isOpen && (
-          <div className="p-4 space-y-3 bg-white">
+  <div
+    ref={(el) => (sectionRefs.current[key] = el)}
+    className="p-4 space-y-3 bg-white dark:bg-gray-800"
+  >
 
             {/* FORMULARZ */}
             <form
@@ -567,7 +627,7 @@ const balance = totalIncome - totalExpenses;
 </div>
 </div>
 
-<div className="bg-white rounded-xl shadow p-6 space-y-4">
+<div className="bg-white dark:bg-gray-800 rounded-xl shadow p-6 space-y-4">
   <h2 className="text-xl font-semibold">
     Wydatki zmienne — {totalVariable.toFixed(2)} zł
   </h2>
@@ -586,10 +646,20 @@ const balance = totalIncome - totalExpenses;
         <div key={key} className="border rounded-lg overflow-hidden">
           <button
             type="button"
-            onClick={() =>
-              setOpenVariableCategory(isOpen ? null : key)
-            }
-            className="w-full text-left px-4 py-3 bg-gray-100 hover:bg-gray-200 flex justify-between items-center"
+            onClick={() => {
+  const newState = isOpen ? null : key;
+  setOpenVariableCategory(newState);
+
+  if (!isOpen) {
+    setTimeout(() => {
+      sectionRefs.current[key]?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    }, 100);
+  }
+}}
+            className="w-full text-left px-6 py-4 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 flex justify-between items-center transition-colors"
           >
             <span className="font-semibold">
               {label}
@@ -600,7 +670,10 @@ const balance = totalIncome - totalExpenses;
           </button>
 
           {isOpen && (
-            <div className="p-4 space-y-3 bg-white">
+  <div
+    ref={(el) => (sectionRefs.current[key] = el)}
+    className="p-4 space-y-3 bg-white dark:bg-gray-800"
+  >
 
               <form
                 onSubmit={(e) => {
@@ -653,7 +726,7 @@ const balance = totalIncome - totalExpenses;
       className={`px-3 py-1 rounded ${
         dailyView === "list"
           ? "bg-blue-500 text-white"
-          : "bg-gray-200"
+          : "bg-gray-200 dark:bg-gray-700"
       }`}
     >
       Lista
@@ -665,7 +738,7 @@ const balance = totalIncome - totalExpenses;
       className={`px-3 py-1 rounded ${
         dailyView === "calendar"
           ? "bg-blue-500 text-white"
-          : "bg-gray-200"
+          : "bg-gray-200 dark:bg-gray-700"
       }`}
     >
       Kalendarz
@@ -750,10 +823,24 @@ const balance = totalIncome - totalExpenses;
       cells.push(
 <div
   key={day}
- onClick={() =>
-  setSelectedDay((prev) => (prev === day ? null : day))
-}
-  className={`cursor-pointer border rounded p-2 min-h-[90px] flex flex-col justify-between ${
+onClick={() => {
+  const newDay =
+    selectedDay === day ? null : day;
+
+  setSelectedDay(newDay);
+
+  if (newDay) {
+    setTimeout(() => {
+      calendarWeekRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    }, 100);
+  }
+}}
+  className={`cursor-pointer border rounded p-1 sm:p-2 
+min-h-[70px] sm:min-h-[90px] 
+flex flex-col justify-between text-xs sm:text-sm
   selectedDay === day ? "ring-2 ring-blue-500" : ""
 } ${(() => {
   const value = dailyTotals[day] || 0;
@@ -767,8 +854,8 @@ const monthHasAnyData =
   totalFixed !== 0 ||
   totalVariable !== 0;
 
-  if (!monthHasAnyData) return "bg-white";
-  if (isFuture) return "bg-white";
+  if (!monthHasAnyData) return "bg-white dark:bg-gray-800";
+  if (isFuture) return "bg-white dark:bg-gray-800";
 
   if (value === 0) return "bg-green-400 text-white";
   if (value > 0 && value <= 10) return "bg-green-300";
@@ -779,13 +866,13 @@ const monthHasAnyData =
   if (value > 70 && value <= 90) return "bg-red-400 text-white";
   if (value > 90) return "bg-red-600 text-white";
 
-  return "bg-white";
+  return "bg-white dark:bg-gray-800";
   
 })()}`}
 >
   <div className="text-sm font-semibold">{day}</div>
 
-<div className="text-sm font-bold">
+<div className="text-[10px] sm:text-sm font-bold leading-tight break-words">
   {(() => {
     const todayDate = new Date();
     const cellDate = new Date(year, monthIndex, day);
@@ -807,7 +894,7 @@ const monthHasAnyData =
 
     return (
       <div>
-        <div className="grid grid-cols-7 text-center font-semibold mb-2">
+        <div className="grid grid-cols-7 text-center font-semibold mb-2 text-xs sm:text-sm">
           <div>Pon</div>
           <div>Wt</div>
           <div>Śr</div>
@@ -817,63 +904,99 @@ const monthHasAnyData =
           <div>Nd</div>
         </div>
 
-        <div className="grid grid-cols-7 gap-2">
-          {cells}
-        </div>
-{selectedDay && (
-  <div className="mt-4 p-4 bg-white rounded shadow">
-    <h3 className="font-semibold mb-2">
-      📅 {selectedDay} {months[monthIndex]} {year}
-    </h3>
-<form
-  onSubmit={(e) => {
-    e.preventDefault();
-    addQuickDailyExpense();
-  }}
-  className="flex gap-2 mb-3"
->
-  <input
-    type="number"
-    step="0.01"
-    placeholder="Kwota"
-    value={quickAmount}
-    onChange={(e) => setQuickAmount(e.target.value)}
-    className="border rounded px-2 py-1 w-32"
-  />
+        <div className="space-y-2">
+  {Array.from({ length: Math.ceil(cells.length / 7) }).map((_, week) => {
+    const weekCells = cells.slice(week * 7, week * 7 + 7);
 
-  <button
-    type="submit"
-    className="bg-blue-500 text-white px-4 rounded"
-  >
-    +
-  </button>
-</form>
-    {(items.filter(i => i.day === selectedDay)).length === 0 ? (
-      <div className="text-green-600">
-        0.00 zł — brak wydatków
+    return (
+      <div key={week}>
+       <div className="grid grid-cols-7 gap-1 sm:gap-2">
+          {weekCells}
+        </div>
+
+        {selectedDay &&
+          (() => {
+            const position =
+              startOffset + (selectedDay - 1);
+            const selectedWeek = Math.floor(position / 7);
+
+            if (selectedWeek !== week) return null;
+
+            return (
+              <div
+  ref={calendarWeekRef}
+  className="mt-3 p-4 bg-white dark:bg-gray-800 rounded shadow"
+>
+                <h3 className="font-semibold mb-2">
+                  📅 {selectedDay} {months[monthIndex]} {year}
+                </h3>
+
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    addQuickDailyExpense();
+                  }}
+                  className="flex gap-2 mb-3"
+                >
+                  <input
+                    type="number"
+                    step="0.01"
+                    placeholder="Kwota"
+                    value={quickAmount}
+                    onChange={(e) =>
+                      setQuickAmount(e.target.value)
+                    }
+                    className="border rounded px-2 py-1 w-32"
+                  />
+
+                  <button
+                    type="submit"
+                    className="bg-blue-500 text-white px-4 rounded"
+                  >
+                    +
+                  </button>
+                </form>
+
+                {(items.filter(
+                  (i) => i.day === selectedDay
+                )).length === 0 ? (
+                  <div className="text-green-600">
+                    0.00 zł — brak wydatków
+                  </div>
+                ) : (
+                  items
+                    .filter(
+                      (i) => i.day === selectedDay
+                    )
+                    .map((item) => (
+                      <div
+                        key={item.id}
+                        className="flex justify-between border-b py-1"
+                      >
+                        <span>
+                          {item.amount.toFixed(2)} zł
+                        </span>
+                        <button
+                          onClick={() =>
+                            deleteVariableExpense(
+                              "codzienne",
+                              item.id
+                            )
+                          }
+                          className="text-red-500"
+                        >
+                          x
+                        </button>
+                      </div>
+                    ))
+                )}
+              </div>
+            );
+          })()}
       </div>
-    ) : (
-      items
-        .filter(i => i.day === selectedDay)
-        .map((item) => (
-          <div
-            key={item.id}
-            className="flex justify-between border-b py-1"
-          >
-            <span>{item.amount.toFixed(2)} zł</span>
-            <button
-              onClick={() =>
-                deleteVariableExpense("codzienne", item.id)
-              }
-              className="text-red-500"
-            >
-              x
-            </button>
-          </div>
-        ))
-    )}
-  </div>
-)}
+    );
+  })}
+</div>
       </div>
     );
   })()}
@@ -909,21 +1032,22 @@ const monthHasAnyData =
     })}
   </div>
 </div>
-<div className="bg-white rounded-xl shadow p-4">
-  <div className="grid grid-cols-[80px_1fr_120px] items-center">
+<div className="bg-white dark:bg-gray-800 rounded-xl shadow p-4">
+  <div className="grid grid-cols-[80px_1fr_auto] items-center">
 
     {/* LEWA STRZAŁKA */}
     <div className="flex justify-start">
       <button
   onClick={previousMonth}
-  className="group w-11 h-11 flex items-center justify-center rounded-full
-             bg-gradient-to-br from-gray-100 to-gray-200
-             shadow-md hover:shadow-lg
-             active:scale-95
-             transition-all duration-200"
+className="group w-11 h-11 flex items-center justify-center rounded-full
+           bg-gradient-to-br from-gray-100 to-gray-200
+           dark:from-gray-700 dark:to-gray-600
+           shadow-md hover:shadow-lg
+           active:scale-95
+           transition-all duration-200"
 >
   <svg
-    className="w-5 h-5 text-gray-700 group-hover:-translate-x-1 transition-transform duration-200"
+    className="w-5 h-5 text-gray-700 dark:text-gray-200 group-hover:-translate-x-1 transition-transform duration-200"
     fill="none"
     stroke="currentColor"
     strokeWidth="2.5"
@@ -943,14 +1067,15 @@ const monthHasAnyData =
     <div className="flex justify-end items-center gap-3">
       <button
   onClick={nextMonth}
-  className="group w-11 h-11 flex items-center justify-center rounded-full
-             bg-gradient-to-br from-gray-100 to-gray-200
-             shadow-md hover:shadow-lg
-             active:scale-95
-             transition-all duration-200"
+className="group w-11 h-11 flex items-center justify-center rounded-full
+           bg-gradient-to-br from-gray-100 to-gray-200
+           dark:from-gray-700 dark:to-gray-600
+           shadow-md hover:shadow-lg
+           active:scale-95
+           transition-all duration-200"
 >
   <svg
-    className="w-5 h-5 text-gray-700 group-hover:translate-x-1 transition-transform duration-200"
+    className="w-5 h-5 text-gray-700 dark:text-gray-200 group-hover:translate-x-1 transition-transform duration-200"
     fill="none"
     stroke="currentColor"
     strokeWidth="2.5"
@@ -960,16 +1085,31 @@ const monthHasAnyData =
   </svg>
 </button>
 
-      <button
-        onClick={() => {
-          if (confirm("Na pewno wyczyścić cały miesiąc?")) {
-            clearMonth();
-          }
-        }}
-        className="w-10 h-10 flex items-center justify-center rounded-full bg-red-100 hover:bg-red-200 shadow transition"
-      >
-        🗑
-      </button>
+<button
+  onClick={() => {
+    if (confirm("Na pewno wyczyścić cały miesiąc?")) {
+      clearMonth();
+    }
+  }}
+  className="w-11 h-11 flex items-center justify-center rounded-full
+             bg-red-100 hover:bg-red-200
+             dark:bg-red-900 dark:hover:bg-red-800
+             transition-all duration-200 active:scale-95"
+>
+  <svg
+    className="w-6 h-6 text-red-600 dark:text-red-300"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    viewBox="0 0 24 24"
+  >
+    <path
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      d="M6 7h12M9 7V5h6v2m-7 0v12m4-12v12m4-12v12M5 7h14l-1 14H6L5 7z"
+    />
+  </svg>
+</button>
     </div>
 
   </div>
