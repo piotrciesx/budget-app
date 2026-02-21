@@ -43,6 +43,7 @@ const [dailyView, setDailyView] = useState("list");
 const [quickAmount, setQuickAmount] = useState("");
 const sectionRefs = useRef({});
 const calendarWeekRef = useRef(null);
+const incomeRef = useRef(null);
 
 useEffect(() => {
   const savedIncomes = localStorage.getItem("incomes");
@@ -92,19 +93,19 @@ useEffect(() => {
     "Listopad",
     "Grudzień",
   ];
-  const fixedCategories = {
-  mieszkanie: "Mieszkanie i rachunki",
-  raty: "Raty",
-  subskrypcje: "Subskrypcje",
-  pozostale: "Pozostałe",
+const fixedCategories = {
+  mieszkanie: { label: "Mieszkanie i rachunki", icon: "home" },
+  raty: { label: "Raty", icon: "percent" },
+  subskrypcje: { label: "Subskrypcje", icon: "tv" },
+  pozostale: { label: "Pozostałe", icon: "box" },
 };
 
 const variableCategories = {
-  podroze: "Podróże",
-  jedzenie: "Jedzenie poza domem",
-  okolicznosciowe: "Okolicznościowe",
-  pierdoly: "Pierdoły",
-  codzienne: "Codzienne",
+  podroze: { label: "Podróże", icon: "plane" },
+  jedzenie: { label: "Jedzenie poza domem", icon: "burger" },
+  okolicznosciowe: { label: "Okolicznościowe", icon: "gift" },
+  pozostale: { label: "Pozostałe", icon: "box" },
+  codzienne: { label: "Codzienne", icon: "cart" },
 };
 
 
@@ -419,20 +420,25 @@ const balance = totalIncome - totalExpenses;
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-6 space-y-2">
   <h2 className="text-xl font-semibold">Bilans miesiąca</h2>
 
-  <div className="flex justify-between">
-    <span>Przychody:</span>
-    <span className="text-green-600">
-      {totalIncome.toFixed(2)} zł
-    </span>
+<div className="flex justify-between items-center">
+  <div className="flex items-center gap-2 text-green-600">
+    <Icon name="plusCircle" />
+    <span>Przychody</span>
   </div>
+  <span className="text-green-600">
+    {totalIncome.toFixed(2)} zł
+  </span>
+</div>
 
-  <div className="flex justify-between">
-    <span>Wydatki:</span>
-    <span className="text-red-600">
-      {totalExpenses.toFixed(2)} zł
-    </span>
+<div className="flex justify-between items-center">
+  <div className="flex items-center gap-2 text-red-600">
+    <Icon name="minusCircle" />
+    <span>Wydatki</span>
   </div>
-
+  <span className="text-red-600">
+    {totalExpenses.toFixed(2)} zł
+  </span>
+</div>
   <div className="flex justify-between border-t pt-2 font-bold">
     <span>Bilans:</span>
     <span className={balance >= 0 ? "text-green-600" : "text-red-600"}>
@@ -444,19 +450,35 @@ const balance = totalIncome - totalExpenses;
 <div className="bg-white dark:bg-gray-800 rounded-xl shadow overflow-hidden">
   <button
     type="button"
-    onClick={() => setOpenIncome(!openIncome)}
-    className="w-full text-left px-6 py-4 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 flex justify-between items-center transition-colors"
-  >
-    <span className="text-xl font-semibold">
-      Przychody
-    </span>
-    <span className="text-green-600 font-semibold">
-      {totalIncome.toFixed(2)} zł
-    </span>
-  </button>
+    onClick={() => {
+  const newState = !openIncome;
+  setOpenIncome(newState);
 
-  {openIncome && (
-    <div className="p-6 space-y-4 bg-white dark:bg-gray-800">
+  if (newState) {
+    setTimeout(() => {
+      incomeRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    }, 100);
+  }
+}}
+    className="w-full text-left px-6 py-4 
+bg-green-100 dark:bg-green-900/40 
+hover:bg-green-200 dark:hover:bg-green-900/60
+text-green-800 dark:text-green-200
+flex justify-between items-center transition-colors"
+  >
+    <div className="flex items-center gap-2 font-semibold">
+  <Icon name="income" className="w-5 h-5" />
+  <span>Przychody</span>
+</div>
+  </button>
+{openIncome && (
+  <div
+    ref={incomeRef}
+    className="p-6 space-y-4 bg-white dark:bg-gray-800"
+  >
 
       <form
         onSubmit={(e) => {
@@ -514,12 +536,16 @@ const balance = totalIncome - totalExpenses;
   )}
 </div>
 
- <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-6 space-y-4">
-  <h2 className="text-xl font-semibold">
-    Wydatki stałe — {totalFixed.toFixed(2)} zł
-  </h2>
-<div className="space-y-3">
-  {Object.entries(fixedCategories).map(([key, label]) => {
+<div className="bg-white dark:bg-gray-800 rounded-xl shadow overflow-hidden">
+<div className="px-6 py-4 
+bg-blue-100 dark:bg-blue-900/40 
+text-blue-800 dark:text-blue-200
+font-semibold text-xl rounded-t-xl flex items-center gap-2">
+  <Icon name="fixed" />
+  <span>Wydatki stałe — {totalFixed.toFixed(2)} zł</span>
+</div>
+<div className="p-6 space-y-3">
+  {Object.entries(fixedCategories).map(([key, category]) => {
     const items = currentFixed[key] || [];
     const categoryTotal = items.reduce(
       (sum, item) => sum + item.amount,
@@ -548,9 +574,10 @@ onClick={() => {
 }}
           className="w-full text-left px-6 py-4 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 flex justify-between items-center transition-colors"
         >
-          <span className="font-semibold">
-            {label}
-          </span>
+          <div className="flex items-center gap-2 font-semibold">
+  <Icon name={category.icon} />
+  <span>{category.label}</span>
+</div>
           <span>
             {categoryTotal.toFixed(2)} zł
           </span>
@@ -627,13 +654,17 @@ onClick={() => {
 </div>
 </div>
 
-<div className="bg-white dark:bg-gray-800 rounded-xl shadow p-6 space-y-4">
-  <h2 className="text-xl font-semibold">
-    Wydatki zmienne — {totalVariable.toFixed(2)} zł
-  </h2>
+<div className="bg-white dark:bg-gray-800 rounded-xl shadow overflow-hidden">
+<div className="px-6 py-4 
+bg-purple-100 dark:bg-purple-900/40 
+text-purple-800 dark:text-purple-200
+font-semibold text-xl rounded-t-xl flex items-center gap-2">
+  <Icon name="variable" />
+  <span>Wydatki zmienne — {totalVariable.toFixed(2)} zł</span>
+</div>
 
-  <div className="space-y-3">
-    {Object.entries(variableCategories).map(([key, label]) => {
+  <div className="space-y-3 mt-6">
+    {Object.entries(variableCategories).map(([key, category]) => {
       const items = currentVariable[key] || [];
       const categoryTotal = items.reduce(
         (sum, item) => sum + item.amount,
@@ -643,7 +674,10 @@ onClick={() => {
       const isOpen = openVariableCategory === key;
 
       return (
-        <div key={key} className="border rounded-lg overflow-hidden">
+        <div
+  key={key}
+  className="border rounded-lg overflow-hidden mx-4"
+>
           <button
             type="button"
             onClick={() => {
@@ -661,9 +695,10 @@ onClick={() => {
 }}
             className="w-full text-left px-6 py-4 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 flex justify-between items-center transition-colors"
           >
-            <span className="font-semibold">
-              {label}
-            </span>
+            <div className="flex items-center gap-2 font-semibold">
+  <Icon name={category.icon} />
+  <span>{category.label}</span>
+</div>
             <span>
               {categoryTotal.toFixed(2)} zł
             </span>
@@ -1118,4 +1153,92 @@ className="group w-11 h-11 flex items-center justify-center rounded-full
     </main>
   );
 }
+function Icon({ name, className = "w-5 h-5" }) {
+  const icons = {
+    income: (
+  <svg
+    className={className}
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    viewBox="0 0 24 24"
+  >
+    <ellipse cx="12" cy="6" rx="7" ry="3" />
+    <path d="M5 6v6c0 1.7 3 3 7 3s7-1.3 7-3V6" />
+    <path d="M5 12v6c0 1.7 3 3 7 3s7-1.3 7-3v-6" />
+  </svg>
+),
+    fixed: (
+      <svg className={className} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path d="M4 8h16M4 12h16M4 16h16" />
+      </svg>
+    ),
+    variable: (
+      <svg className={className} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path d="M8 7l4-4 4 4M8 17l4 4 4-4" />
+      </svg>
+    ),
+    home: (
+      <svg className={className} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path d="M3 10l9-7 9 7v10H3z" />
+      </svg>
+    ),
+    percent: (
+      <svg className={className} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <circle cx="7" cy="7" r="2" />
+        <circle cx="17" cy="17" r="2" />
+        <path d="M7 17L17 7" />
+      </svg>
+    ),
+    tv: (
+      <svg className={className} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <rect x="3" y="5" width="18" height="12" rx="2" />
+        <path d="M8 21h8" />
+      </svg>
+    ),
+    box: (
+      <svg className={className} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path d="M3 7l9 4 9-4-9-4-9 4z" />
+        <path d="M3 7v10l9 4 9-4V7" />
+      </svg>
+    ),
+    plane: (
+      <svg className={className} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path d="M2 16l20-8-8 20-2-9-10-3z" />
+      </svg>
+    ),
+    burger: (
+      <svg className={className} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path d="M3 10h18M5 14h14M4 10a8 8 0 0116 0" />
+      </svg>
+    ),
+    gift: (
+      <svg className={className} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <rect x="3" y="8" width="18" height="13" />
+        <path d="M12 8v13M3 12h18M12 3c2 0 3 1 3 3H9c0-2 1-3 3-3z" />
+      </svg>
+    ),
+    cart: (
+      <svg className={className} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <circle cx="9" cy="21" r="1" />
+        <circle cx="20" cy="21" r="1" />
+        <path d="M1 1h4l2 13h13l3-8H6" />
+      </svg>
+    ),
+    plusCircle: (
+  <svg className={className} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 8v8M8 12h8" />
+  </svg>
+),
 
+minusCircle: (
+  <svg className={className} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+    <circle cx="12" cy="12" r="9" />
+    <path d="M8 12h8" />
+  </svg>
+),
+  };
+
+  return icons[name] || null;
+}
