@@ -8,16 +8,7 @@ const Level1Block = dynamic(
 
 import { useState, useEffect, useRef, useMemo } from "react";
 import { DndContext, closestCenter } from "@dnd-kit/core";
-import { SortableContext, verticalListSortingStrategy, useSortable } from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
-
-import React from "react";
-
-import Level2AddForm from "../components/Level2AddForm";
-
-import Level2Item from "../components/Level2Item";
-
-import Level3Block from "../components/Level3Block";
+import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 
 import useTransactions from "../hooks/useTransactions";
 
@@ -25,22 +16,41 @@ import {
   getCategorySum,
   formatAmount,
   getSuggestions,
-  getTopCategories
+  getTopCategories,
+  sortCategories
 } from "../utils/categorySelectors";
 
 import AddCategoryForm from "../components/AddCategoryForm";
-
-import Level3AddForm from "../components/Level3AddForm";
 
 import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 
 import { DragOverlay } from "@dnd-kit/core";
 
-import CategoryRow from "../components/CategoryRow";
-
 import DragPreview from "../components/DragPreview";
 
+import useCategories from "../hooks/useCategories";
+
+import useHeatmap from "../hooks/useHeatmap";
+
+import { BudgetProvider } from "../context/BudgetContext";
+
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
+
+import { supabase } from "../lib/supabaseClient";
+
+import {
+  LineChart,
+  Line,
+  CartesianGrid,
+  XAxis,
+  YAxis,
+  ReferenceLine,
+  Area,
+  AreaChart
+} from "recharts";
+
 export default function Home() {
+  const [user, setUser] = useState(null);
   const [monthIndex, setMonthIndex] = useState(new Date().getMonth());
   const [year, setYear] = useState(new Date().getFullYear());
   const [darkMode, setDarkMode] = useState(false);
@@ -56,25 +66,30 @@ export default function Home() {
 
     setIsMounted(true);
   }, []);
-  const [selectedDay, setSelectedDay] = useState(null);
-  const [expenseInputs, setExpenseInputs] = useState({});
-  const [noteInputs, setNoteInputs] = useState({});
-  const [dayInputs, setDayInputs] = useState({});
+
+  const loginWithGoogle = async () => {
+    await supabase.auth.signInWithOAuth({
+      provider: "google",
+    });
+  };
+
   const today = new Date();
   const isCurrentMonth =
     today.getMonth() === monthIndex &&
     today.getFullYear() === year;
 
-  const [heatmapMode, setHeatmapMode] = useState("static");
-  // static = obecne progi
-  // dynamic = skalowane względem max dnia
-  const [isEditingThresholds, setIsEditingThresholds] = useState(false);
-  const [tempThresholds, setTempThresholds] = useState([]);
-  const [heatmapSettings, setHeatmapSettings] = useState({
-    global: [10, 20, 30, 50, 70, 90],
-    monthly: {}
-  });
-  // DRZEWO – sterowanie poziomami
+  const {
+    heatmapMode,
+    setHeatmapMode,
+    isEditingThresholds,
+    setIsEditingThresholds,
+    heatmapSettings,
+    setHeatmapSettings,
+    tempThresholds,
+    setTempThresholds,
+    activeThresholds
+  } = useHeatmap();
+
   const [openLevel1, setOpenLevel1] = useState(null);
   const [openLevel2, setOpenLevel2] = useState(null);
   const [openLevel3, setOpenLevel3] = useState(null);
@@ -94,32 +109,39 @@ export default function Home() {
   const [showArchived, setShowArchived] = useState({});
   const [activeId, setActiveId] = useState(null);
   const monthKey = `${year}-${String(monthIndex + 1).padStart(2, "0")}`;
+  const isTransactionInMonth = (txDate, targetYear = year, targetMonthIndex = monthIndex) => {
+    const d = new Date(txDate);
+
+    return (
+      d.getFullYear() === targetYear &&
+      d.getMonth() === targetMonthIndex
+    );
+  };
+  const previousMonthIndex = monthIndex === 0 ? 11 : monthIndex - 1;
+  const previousYear = monthIndex === 0 ? year - 1 : year;
+
+  const previousMonthKey = `${previousYear}-${String(previousMonthIndex + 1).padStart(2, "0")}`;
   const {
-  transactions,
-  setTransactions,
+    transactions,
+    setTransactions,
 
-  editingTransactionId,
-  setEditingTransactionId,
+    editingTransactionId,
+    setEditingTransactionId,
 
-  movingTransactionId,
-  setMovingTransactionId,
+    movingTransactionId,
+    setMovingTransactionId,
 
-  selectedTransactions,
-  setSelectedTransactions,
+    selectedTransactions,
+    setSelectedTransactions,
 
-  addExpense,
-  moveTransaction,
-  toggleTransactionSelection,
-  deleteSelectedTransactions,
-  clearMonth,
-  clearAllHistory
-} = useTransactions(monthKey);
+    addExpense,
+    moveTransaction,
+    toggleTransactionSelection,
+    deleteSelectedTransactions,
+    clearMonth,
+    clearAllHistory
+  } = useTransactions(user, year, monthIndex);
 
-  // =======================
-  // NOWY MODEL DANYCH 1.0
-  // =======================
-
-  // wszystkie transakcje (zastąpi incomes/fixed/variable w ETAPIE 2)
   const moveRef = useRef(null);
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -138,133 +160,21 @@ export default function Home() {
     };
   }, []);
 
-  // drzewo kategorii (3 poziomy)
-  const [categories, setCategories] = useState([
-    // ===== POZIOM 1 =====
-    {
-      id: "income",
-      name: "Przychody",
-      parentId: null,
-      type: "income",
-    },
-    {
-      id: "expense",
-      name: "Wydatki",
-      parentId: null,
-      type: "expense",
-    },
-
-    // ===== POZIOM 2 (WYDATKI) =====
-    {
-      id: "fixed",
-      name: "Stałe",
-      parentId: "expense",
-      type: "expense",
-      activePeriods: [
-        { start: "2000-01", end: null }
-      ],
-    },
-    {
-      id: "variable",
-      name: "Zmienne",
-      parentId: "expense",
-      type: "expense",
-      activePeriods: [
-        { start: "2000-01", end: null }
-      ],
-    },
-
-    // ===== POZIOM 3 – FIXED =====
-    {
-      id: "mieszkanie",
-      name: "Mieszkanie i rachunki",
-      parentId: "fixed",
-      type: "expense",
-      activePeriods: [
-        { start: "2000-01", end: null }
-      ],
-    },
-    {
-      id: "raty",
-      name: "Raty",
-      parentId: "fixed",
-      type: "expense",
-      activePeriods: [
-        { start: "2000-01", end: null }
-      ],
-    },
-    {
-      id: "subskrypcje",
-      name: "Subskrypcje",
-      parentId: "fixed",
-      type: "expense",
-      activePeriods: [
-        { start: "2000-01", end: null }
-      ],
-    },
-    {
-      id: "pozostale_fixed",
-      name: "Pozostałe",
-      parentId: "fixed",
-      type: "expense",
-      activePeriods: [
-        { start: "2000-01", end: null }
-      ],
-    },
-
-    // ===== POZIOM 3 – VARIABLE =====
-    {
-      id: "podroze",
-      name: "Podróże",
-      parentId: "variable",
-      type: "expense",
-      activePeriods: [
-        { start: "2000-01", end: null }
-      ],
-    },
-    {
-      id: "jedzenie",
-      name: "Jedzenie poza domem",
-      parentId: "variable",
-      type: "expense",
-      activePeriods: [
-        { start: "2000-01", end: null }
-      ],
-    },
-    {
-      id: "okolicznosciowe",
-      name: "Okolicznościowe",
-      parentId: "variable",
-      type: "expense",
-      activePeriods: [
-        { start: "2000-01", end: null }
-      ],
-    },
-    {
-      id: "pozostale_variable",
-      name: "Pozostałe",
-      parentId: "variable",
-      type: "expense",
-      activePeriods: [
-        { start: "2000-01", end: null }
-      ],
-    },
-    {
-      id: "codzienne",
-      name: "Codzienne",
-      parentId: "variable",
-      type: "expense",
-      activePeriods: [
-        { start: "2000-01", end: null }
-      ],
-    },
-  ]);
-
-  const categoriesById = useMemo(() => {
-    return Object.fromEntries(
-      categories.map(c => [c.id, c])
-    );
-  }, [categories]);
+  const {
+    categories,
+    setCategories,
+    categoriesById,
+    getChildren,
+    getLowestCategories,
+    getCategoryLevel,
+    getAllowedCategories,
+    renameCategory,
+    deleteCategory,
+    closeCategory,
+    reopenCategory,
+    addCategoryLevel2,
+    addCategoryLevel3
+  } = useCategories();
 
   const activeCategory = categoriesById[activeId];
 
@@ -274,7 +184,6 @@ export default function Home() {
       .map(c => c.id)
   );
 
-  // ustawienia per kategoria (checkbox data/opis)
   const [categorySettings, setCategorySettings] = useState({});
 
   const [activeSuggestionCategory, setActiveSuggestionCategory] = useState(null);
@@ -289,6 +198,30 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    const loadUser = async () => {
+      const { data, error } = await supabase.auth.getUser();
+
+      if (data?.user) {
+        setUser(data.user);
+      }
+    };
+
+    loadUser();
+  }, []);
+
+  useEffect(() => {
+    const { data: listener } = supabase.auth.onAuthStateChange(
+      (event, session) => {
+        setUser(session?.user ?? null);
+      }
+    );
+
+    return () => {
+      listener.subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
     localStorage.setItem(
       "suggestionBlacklist",
       JSON.stringify(suggestionBlacklist)
@@ -296,12 +229,12 @@ export default function Home() {
   }, [suggestionBlacklist]);
 
   useEffect(() => {
-  const savedHeatmap = localStorage.getItem("heatmapSettings");
+    const savedHeatmap = localStorage.getItem("heatmapSettings");
 
-  if (savedHeatmap) {
-    setHeatmapSettings(JSON.parse(savedHeatmap));
-  }
-}, []);
+    if (savedHeatmap) {
+      setHeatmapSettings(JSON.parse(savedHeatmap));
+    }
+  }, []);
 
   useEffect(() => {
     localStorage.setItem("sortModeLevel2", sortModeLevel2);
@@ -352,7 +285,6 @@ export default function Home() {
   };
   const isCategoryActiveInMonth = (category, monthKey) => {
 
-    // 🆕 NOWY MODEL (activePeriods)
     if (category.activePeriods) {
       return category.activePeriods.some(period => {
         const afterStart = monthKey >= period.start;
@@ -361,7 +293,6 @@ export default function Home() {
       });
     }
 
-    // 🔄 STARY MODEL (startMonth / endMonth)
     if (category.startMonth && monthKey < category.startMonth) {
       return false;
     }
@@ -375,178 +306,34 @@ export default function Home() {
 
   useEffect(() => {
     setSelectedTransactions([]);
-  }, [monthKey]);
-  // ===== SELECTORY DRZEWA KATEGORII =====
+  }, [monthIndex]);
+
+  useEffect(() => {
+    const createProfile = async () => {
+      const { data } = await supabase.auth.getUser();
+      const user = data.user;
+
+      if (!user) return;
+
+      await supabase.from("profiles").upsert({
+        id: user.id,
+        user_id: user.id
+      });
+    };
+
+    createProfile();
+  }, []);
 
   const level1Categories = categories.filter(
     (cat) =>
       cat.parentId === null &&
-      isCategoryActiveInMonth(cat, monthKey)
+      isCategoryActiveInMonth(cat, year, monthIndex)
   );
 
   const level1Ids = useMemo(
     () => level1Categories.map((c) => c.id),
     [level1Categories]
   );
-
-  const allCategoryIds = useMemo(() => {
-    return categories.map(c => c.id);
-  }, [categories]);
-
-  const getChildren = (parentId) =>
-    categories.filter((cat) => {
-      if (cat.parentId !== parentId) return false;
-
-      const parent = categories.find(c => c.id === parentId);
-
-      if (!parent) return false;
-
-      if (!isCategoryActiveInMonth(parent, monthKey)) return false;
-
-      if (!isCategoryActiveInMonth(cat, monthKey)) return false;
-
-      return true;
-    });
-
-  const getLowestCategories = () => {
-    return categories.filter((cat) => {
-      const hasChildren = categories.some(
-        (c) => c.parentId === cat.id
-      );
-      return !hasChildren;
-    });
-  };
-
-  // 🔵 SORTOWANIE KATEGORII
-  const sortCategories = (categoriesList, mode) => {
-    if (mode === "manual") {
-      return categoriesList;
-    }
-
-    const getUsage = (catId) => {
-      const childIds = categories
-        .filter(c => c.parentId === catId)
-        .map(c => c.id);
-
-      return transactions.filter(
-        t =>
-          (t.categoryId === catId || childIds.includes(t.categoryId)) &&
-          t.monthKey === monthKey
-      ).length;
-    };
-
-    const getAmount = (catId) => {
-      const childIds = categories
-        .filter(c => c.parentId === catId)
-        .map(c => c.id);
-
-      return transactions
-        .filter(
-          t =>
-            (t.categoryId === catId || childIds.includes(t.categoryId)) &&
-            t.monthKey === monthKey
-        )
-        .reduce((sum, t) => sum + t.amount, 0);
-    };
-
-    const sorted = [...categoriesList];
-
-    if (mode === "usage-desc") {
-      sorted.sort((a, b) =>
-        getUsage(b.id) - getUsage(a.id) ||
-        a.id.localeCompare(b.id)
-      );
-    }
-
-    if (mode === "usage-asc") {
-      sorted.sort((a, b) =>
-        getUsage(a.id) - getUsage(b.id) ||
-        a.id.localeCompare(b.id)
-      );
-    }
-
-    if (mode === "amount-desc") {
-      sorted.sort((a, b) =>
-        getAmount(b.id) - getAmount(a.id) ||
-        a.id.localeCompare(b.id)
-      );
-    }
-
-    if (mode === "amount-asc") {
-      sorted.sort((a, b) =>
-        getAmount(a.id) - getAmount(b.id) ||
-        a.id.localeCompare(b.id)
-      );
-    }
-
-    return sorted;
-  };
-
-  const getCategoryLevel = (categoryId) => {
-    let level = 0;
-    let current = categories.find(c => c.id === categoryId);
-
-    while (current) {
-      level++;
-      current = categories.find(c => c.id === current.parentId);
-    }
-
-    return level; // 1, 2 lub 3
-  };
-
-  const getAllowedCategories = (currentCategoryId) => {
-    const currentCategory = categories.find(
-      (c) => c.id === currentCategoryId
-    );
-
-    // znajdź Level1
-    const level2 = categories.find(
-      (c) => c.id === currentCategory.parentId
-    );
-
-    const level1 = categories.find(
-      (c) => c.id === level2?.parentId
-    );
-
-    return categories.filter((cat) => {
-      if (cat.id === currentCategoryId) return false;
-      // blokada między income / expense
-      if (cat.type !== currentCategory.type) return false;
-
-      const hasChildren = categories.some(
-        (c) => c.parentId === cat.id
-      );
-
-      const currentHasChildren = categories.some(
-        (c) => c.parentId === currentCategory.id
-      );
-
-      // 1️⃣ Jeśli jesteśmy w Level3
-      if (!currentHasChildren) {
-        // możemy przejść:
-        // - do innego Level3 w tym samym Level1
-        // - LUB do Level2, który nie ma Level3
-        const catHasChildren = categories.some(
-          (c) => c.parentId === cat.id
-        );
-
-        if (catHasChildren) return false;
-
-        return true;
-      }
-
-      // 2️⃣ Jeśli jesteśmy w Level2
-      if (currentHasChildren === false) {
-        return true;
-      }
-
-      return true;
-    });
-  };
-
-  const activeThresholds =
-    heatmapSettings.monthly[monthKey] ||
-    heatmapSettings.global;
 
   const previousMonth = () => {
     if (monthIndex === 0) {
@@ -586,79 +373,6 @@ export default function Home() {
     return success;
   };
 
-  const deleteCategory = (categoryId) => {
-
-    // 🚫 blokada Level1
-    if (categoryId === "income" || categoryId === "expense") {
-      alert("Nie można usunąć głównej kategorii systemowej.");
-      return;
-    }
-
-    // 🔹 blokada jeśli ma dzieci
-    const hasChildren = categories.some(
-      cat => cat.parentId === categoryId
-    );
-
-    if (hasChildren) {
-      alert("Nie można usunąć kategorii, ponieważ zawiera podkategorie.");
-      return;
-    }
-
-    // 🔹 blokada jeśli ma historię
-    const hasTransactions = transactions.some(
-      t => t.categoryId === categoryId
-    );
-
-    if (hasTransactions) {
-      alert("Nie można usunąć kategorii, ponieważ ma wpisy historyczne.");
-      return;
-    }
-
-    // 🗑 usunięcie
-    setCategories(prev =>
-      prev.filter(cat => cat.id !== categoryId)
-    );
-  };
-  // ===== DODAWANIE NOWEJ KATEGORII LEVEL 3 =====
-  const addCategoryLevel3 = (parentId, name) => {
-    if (!name || !name.trim()) return;
-
-    const parentCategory = categories.find(
-      (cat) => cat.id === parentId
-    );
-
-    const newCategory = {
-      id: Date.now().toString(),
-      name: name.trim(),
-      parentId,
-      type: parentCategory?.type || "expense",
-      activePeriods: [
-        { start: monthKey, end: null }
-      ],
-    };
-
-    setCategories((prev) => [...prev, newCategory]);
-  };
-
-  // ===== DODAWANIE NOWEJ KATEGORII LEVEL 2 =====
-  // LEVEL 2 – EXPENSE
-  const addCategoryLevel2 = (name) => {
-    if (!name || !name.trim()) return;
-
-    const newCategory = {
-      id: Date.now().toString(),
-      name: name.trim(),
-      parentId: "expense",
-      type: "expense",
-      activePeriods: [
-        { start: monthKey, end: null }
-      ],
-    };
-
-    setCategories((prev) => [...prev, newCategory]);
-  };
-
-  // LEVEL 2 – INCOME
   const addCategoryLevel2Income = (name) => {
     if (!name || !name.trim()) return;
 
@@ -673,140 +387,6 @@ export default function Home() {
     };
 
     setCategories((prev) => [...prev, newCategory]);
-  };
-
-  const closeCategory = (categoryId) => {
-    const category = categories.find((c) => c.id === categoryId);
-    if (!category?.activePeriods) return;
-
-    const lastPeriod =
-      category.activePeriods[category.activePeriods.length - 1];
-
-    // 🔍 BLOKADA: przyszłe transakcje
-    const hasFutureTransactions = transactions.some((t) => {
-      return (
-        t.categoryId === categoryId &&
-        t.monthKey > monthKey
-      );
-    });
-
-    if (hasFutureTransactions) {
-      alert(
-        "Nie można zamknąć kategorii, ponieważ posiada wpisy w przyszłych miesiącach."
-      );
-      return;
-    }
-
-    let shouldCloseNow = false;
-
-    // 🔹 Jeśli jest zaplanowane zamknięcie w przyszłości
-    if (lastPeriod?.end && lastPeriod.end > monthKey) {
-      shouldCloseNow = window.confirm(
-        `Ta kategoria ma już zaplanowane zamknięcie w ${lastPeriod.end}.
-Czy chcesz zamknąć ją wcześniej (${monthKey})?`
-      );
-
-      if (!shouldCloseNow) return;
-    } else {
-      // 🔹 Normalne zamknięcie
-      const confirmClose = window.confirm(
-        `Kategoria będzie widoczna do końca bieżącego miesiąca (${monthKey}). Kontynuować?`
-      );
-
-      if (!confirmClose) return;
-    }
-
-    // 🔹 Aktualizacja activePeriods
-    setCategories((prev) =>
-      prev.map((cat) => {
-        if (cat.id !== categoryId) return cat;
-
-        const updatedPeriods = cat.activePeriods.map((period, index, arr) => {
-          const isLast = index === arr.length - 1;
-
-          if (isLast) {
-            return {
-              ...period,
-              end: monthKey,
-            };
-          }
-
-          return period;
-        });
-
-        return {
-          ...cat,
-          activePeriods: updatedPeriods,
-        };
-      })
-    );
-  };
-
-  const reopenCategory = (categoryId) => {
-    setCategories((prev) =>
-      prev.map((cat) => {
-        if (cat.id !== categoryId) return cat;
-
-        // 🆕 nowy model
-        if (cat.activePeriods) {
-
-          // sprawdź czy ostatni okres już jest otwarty
-          const lastPeriod = cat.activePeriods[cat.activePeriods.length - 1];
-
-          if (lastPeriod && !lastPeriod.end) {
-            return cat; // już aktywna
-          }
-
-          return {
-            ...cat,
-            activePeriods: [
-              ...cat.activePeriods,
-              { start: monthKey, end: null }
-            ]
-          };
-        }
-
-        // 🔁 fallback dla starego modelu
-        return {
-          ...cat,
-          startMonth: monthKey,
-          endMonth: null,
-        };
-      })
-    );
-  };
-
-  const renameCategory = (categoryId) => {
-    const category = categories.find(c => c.id === categoryId);
-    if (!category) return;
-
-    // 🔍 SPRAWDZENIE HISTORII
-    const hasTransactions = transactions.some(
-      t => t.categoryId === categoryId
-    );
-
-    if (hasTransactions) {
-      const confirmRename = window.confirm(
-        "Ta kategoria posiada wpisy historyczne. Zmiana nazwy wpłynie na wszystkie wcześniejsze miesiące. Kontynuować?"
-      );
-
-      if (!confirmRename) return;
-    }
-
-    const newName = window.prompt(
-      "Podaj nową nazwę kategorii:",
-      category.name
-    );
-
-    if (!newName || newName.trim() === "") return;
-
-    setCategories(prev =>
-      prev.map(cat =>
-        cat.id === categoryId
-          ? { ...cat, name: newName.trim() }
-          : cat
-      )
-    );
   };
 
   const createLevel3Category = (name, parentLevel2Id, type) => {
@@ -828,13 +408,174 @@ Czy chcesz zamknąć ją wcześniej (${monthKey})?`
   const totalExpense = transactions
     .filter(
       (t) =>
-        t.monthKey === monthKey &&
+        isTransactionInMonth(t.date) &&
         categories.find((c) => c.id === t.categoryId)?.type === "expense"
     )
     .reduce((sum, t) => sum + t.amount, 0);
 
+  const previousMonthExpense = transactions
+    .filter((t) => {
+      const d = new Date(t.date);
+
+      return (
+        d.getMonth() === previousMonthIndex &&
+        d.getFullYear() === previousYear &&
+        categories.find((c) => c.id === t.categoryId)?.type === "expense"
+      );
+    })
+    .reduce((sum, t) => sum + t.amount, 0);
+
+  const previousMonthIncome = transactions
+    .filter(
+      (t) =>
+        isTransactionInMonth(t.date, previousYear, previousMonthIndex) &&
+        categories.find((c) => c.id === t.categoryId)?.type === "income"
+    )
+    .reduce((sum, t) => sum + t.amount, 0);
+
+  const incomeDifference =
+    getCategorySum("income", transactions, categories) -
+    previousMonthIncome;
+
+  const incomePercentChange =
+    previousMonthIncome === 0
+      ? 0
+      : (incomeDifference / previousMonthIncome) * 100;
+
+  const previousMonthBalance =
+    previousMonthIncome - previousMonthExpense;
+
+  const currentBalance =
+    getCategorySum("income", transactions, categories) -
+    totalExpense;
+
+  const balanceDifference =
+    currentBalance - previousMonthBalance;
+
+  const balancePercentChange =
+    previousMonthBalance === 0
+      ? 0
+      : (balanceDifference / Math.abs(previousMonthBalance)) * 100;
+
+  const expenseDifference = totalExpense - previousMonthExpense;
+
+  const expensePercentChange =
+    previousMonthExpense === 0
+      ? 0
+      : (expenseDifference / previousMonthExpense) * 100;
+
+  const topExpenseCategories = (() => {
+    const expenses = transactions.filter(
+      t =>
+        isTransactionInMonth(t.date) &&
+        categories.find(c => c.id === t.categoryId)?.type === "expense"
+    );
+
+    const sums = {};
+
+    expenses.forEach(t => {
+      sums[t.categoryId] = (sums[t.categoryId] || 0) + t.amount;
+    });
+
+    return Object.entries(sums)
+      .map(([categoryId, amount]) => ({
+        category: categories.find(c => c.id === categoryId),
+        amount
+      }))
+      .sort((a, b) => b.amount - a.amount)
+      .slice(0, 3);
+  })();
+
   const balance =
-    getCategorySum("income", transactions, categories, monthKey) - totalExpense;
+    getCategorySum("income", transactions, categories) - totalExpense;
+
+  const last6Months = [];
+
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(year, monthIndex - i, 1);
+
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+
+    const label = months[d.getMonth()].slice(0, 3);
+
+    const expense = transactions
+      .filter(
+        (t) =>
+          t.date === key &&
+          categories.find((c) => c.id === t.categoryId)?.type === "expense"
+      )
+      .reduce((sum, t) => sum + t.amount, 0);
+
+    last6Months.push({
+      name: label,
+      value: expense,
+    });
+  }
+
+  const last6MonthsIncome = [];
+
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(year, monthIndex - i, 1);
+
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+
+    const label = months[d.getMonth()].slice(0, 3);
+
+    const income = transactions
+      .filter(
+        (t) =>
+          t.date === key &&
+          categories.find((c) => c.id === t.categoryId)?.type === "income"
+      )
+      .reduce((sum, t) => sum + t.amount, 0);
+
+    last6MonthsIncome.push({
+      name: label,
+      value: income,
+    });
+  }
+
+  const last6MonthsBalance = [];
+
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(year, monthIndex - i, 1);
+
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+
+    const label = months[d.getMonth()].slice(0, 3);
+
+    const income = transactions
+      .filter(
+        (t) =>
+          t.date === key &&
+          categories.find((c) => c.id === t.categoryId)?.type === "income"
+      )
+      .reduce((sum, t) => sum + t.amount, 0);
+
+    const expense = transactions
+      .filter(
+        (t) =>
+          t.date === key &&
+          categories.find((c) => c.id === t.categoryId)?.type === "expense"
+      )
+      .reduce((sum, t) => sum + t.amount, 0);
+
+    last6MonthsBalance.push({
+      name: label,
+      value: income - expense,
+    });
+  }
+
+  const pieData = [
+    {
+      name: "Przychody",
+      value: getCategorySum("income", transactions, categories),
+    },
+    {
+      name: "Wydatki",
+      value: totalExpense,
+    },
+  ];
 
   const incomeCategory = categories.find(c => c.id === "income");
   const expenseCategory = categories.find(c => c.id === "expense");
@@ -870,9 +611,6 @@ Czy chcesz zamknąć ją wcześniej (${monthKey})?`
 
     if (!over || active.id === over.id) return;
 
-    const activeItemGlobal = categories.find(c => c.id === active.id);
-
-    // TYLKO jeśli to Level 2 (ma parentId !== null)
     const level = getCategoryLevel(active.id);
 
     if (level === 2 && sortModeLevel2 !== "manual") {
@@ -889,7 +627,6 @@ Czy chcesz zamknąć ją wcześniej (${monthKey})?`
 
       if (!activeItem || !overItem) return prev;
 
-      // tylko jeśli mają ten sam parent
       if (activeItem.parentId !== overItem.parentId) return prev;
 
       const siblings = prev.filter(c => c.parentId === activeItem.parentId);
@@ -901,7 +638,6 @@ Czy chcesz zamknąć ją wcześniej (${monthKey})?`
       const [moved] = reorderedSiblings.splice(oldIndex, 1);
       reorderedSiblings.splice(newIndex, 0, moved);
 
-      // kluczowa część – zachowujemy globalną kolejność
       let siblingIndex = 0;
 
       return prev.map(cat => {
@@ -931,607 +667,992 @@ Czy chcesz zamknąć ją wcześniej (${monthKey})?`
   };
 
   return (
-    <main className="h-screen overflow-y-auto bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 p-6 transition-colors">
-      <div className="max-w-3xl mx-auto space-y-6">
+    <BudgetProvider
+      value={{
+        categories,
+        setCategories,
+        categoriesById,
+        getChildren,
+        getLowestCategories,
+        getCategoryLevel,
+        getAllowedCategories,
+        renameCategory,
+        deleteCategory,
+        closeCategory,
+        reopenCategory,
+        addCategoryLevel2,
+        addCategoryLevel3,
+        heatmapMode,
+        setHeatmapMode,
+        heatmapSettings,
+        setHeatmapSettings,
+        tempThresholds,
+        setTempThresholds,
+        activeThresholds,
+        transactions,
+        setTransactions
+      }}
+    >
+      <main className="h-screen overflow-y-auto bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 p-6 transition-colors">
+        <div className="max-w-3xl mx-auto space-y-6">
 
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-4">
-          <div className="grid grid-cols-[80px_1fr_auto] items-center">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-4">
+            <div className="grid grid-cols-[80px_1fr_auto] items-center">
 
-            {/* LEWA STRZAŁKA */}
-            <div className="flex justify-start">
-              <button
-                onClick={previousMonth}
-                className="group w-11 h-11 flex items-center justify-center rounded-full
-           bg-gradient-to-br from-gray-100 to-gray-200
-           dark:from-gray-700 dark:to-gray-600
-           shadow-md hover:shadow-lg
-           active:scale-95
-           transition-all duration-200"
-              >
-                <svg
-                  className="w-5 h-5 text-gray-700 dark:text-gray-200 group-hover:-translate-x-1 transition-transform duration-200"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.5"
-                  viewBox="0 0 24 24"
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-                </svg>
-              </button>
-            </div>
-
-            {/* ŚRODEK */}
-            <h1 className="text-xl font-semibold text-center">
-              {months[monthIndex]} {year}
-            </h1>
-
-            {/* PRAWA STRONA */}
-            <div className="flex justify-end items-center gap-3">
-              <button
-                onClick={nextMonth}
-                className="group w-11 h-11 flex items-center justify-center rounded-full
-           bg-gradient-to-br from-gray-100 to-gray-200
-           dark:from-gray-700 dark:to-gray-600
-           shadow-md hover:shadow-lg
-           active:scale-95
-           transition-all duration-200"
-              >
-                <svg
-                  className="w-5 h-5 text-gray-700 dark:text-gray-200 group-hover:translate-x-1 transition-transform duration-200"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.5"
-                  viewBox="0 0 24 24"
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                </svg>
-              </button>
-
-              <button
-                onClick={() => {
-                  if (confirm("Na pewno wyczyścić cały miesiąc?")) {
-                    clearMonth();
-                  }
-                }}
-                className="w-11 h-11 flex items-center justify-center rounded-full
-             bg-red-100 hover:bg-red-200
-             dark:bg-red-900 dark:hover:bg-red-800
-             transition-all duration-200 active:scale-95"
-              >
-                <svg
-                  className="w-6 h-6 text-red-600 dark:text-red-300"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M6 7h12M9 7V5h6v2m-7 0v12m4-12v12m4-12v12M5 7h14l-1 14H6L5 7z"
-                  />
-                </svg>
-              </button>
-              <button
-                onClick={clearAllHistory}
-                className="ml-3 px-3 py-1 bg-red-600 text-white rounded text-sm"
-              >
-                Reset całości
-              </button>
-              {isMounted && (
+              {/* LEWA STRZAŁKA */}
+              <div className="flex justify-start">
                 <button
-                  onClick={() => setDarkMode(!darkMode)}
-                  className="ml-2 px-3 py-1 rounded bg-gray-200 dark:bg-gray-700"
+                  onClick={previousMonth}
+                  className="group w-11 h-11 flex items-center justify-center rounded-full
+           bg-gradient-to-br from-gray-100 to-gray-200
+           dark:from-gray-700 dark:to-gray-600
+           shadow-md hover:shadow-lg
+           active:scale-95
+           transition-all duration-200"
                 >
-                  {darkMode ? "☀️" : "🌙"}
+                  <svg
+                    className="w-5 h-5 text-gray-700 dark:text-gray-200 group-hover:-translate-x-1 transition-transform duration-200"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                  </svg>
                 </button>
-              )}
-            </div>
+              </div>
 
-          </div>
-        </div>
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-6 space-y-2">
-          <h2 className="text-xl font-semibold">Bilans miesiąca</h2>
+              {/* ŚRODEK */}
+              <h1 className="text-xl font-semibold text-center">
+                {months[monthIndex]} {year}
+              </h1>
 
-          <div className="flex justify-between items-center">
-            <div className="flex items-center gap-2 text-green-600">
-              <Icon name="plusCircle" />
-              <span>{incomeCategory?.name}</span>
-            </div>
-            <span className="text-green-600">
-              {formatAmount(getCategorySum("income", transactions, categories, monthKey))} zł
-            </span>
-          </div>
+              {/* PRAWA STRONA */}
+              <div className="flex justify-end items-center gap-3">
+                <button
+                  onClick={nextMonth}
+                  className="group w-11 h-11 flex items-center justify-center rounded-full
+           bg-gradient-to-br from-gray-100 to-gray-200
+           dark:from-gray-700 dark:to-gray-600
+           shadow-md hover:shadow-lg
+           active:scale-95
+           transition-all duration-200"
+                >
+                  <svg
+                    className="w-5 h-5 text-gray-700 dark:text-gray-200 group-hover:translate-x-1 transition-transform duration-200"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+                <button onClick={loginWithGoogle}>
+                  🔑 Zaloguj się przez Google
+                </button>
 
-          <div className="flex justify-between items-center">
-            <div className="flex items-center gap-2 text-red-600">
-              <Icon name="minusCircle" />
-              <span>{expenseCategory?.name}</span>
-            </div>
-            <span className="text-red-600">
-              {formatAmount(totalExpense)} zł
-            </span>
-          </div>
-          <div className="flex justify-between border-t pt-2 font-bold">
-            <span>Bilans:</span>
-            <span className={balance >= 0 ? "text-green-600" : "text-red-600"}>
-              {formatAmount(balance)} zł
-            </span>
-          </div>
-        </div>
-
-        {selectedTransactions.length > 0 &&
-          getSelectedLevel1Types().length === 1 && (
-            <div style={{ padding: "10px", background: "#eef", marginBottom: "10px" }}>
-              <span>Zaznaczone: {selectedTransactions.length}</span>
-
-              <select
-                onChange={(e) => {
-                  const value = e.target.value;
-                  if (!value) return;
-
-                  setTransactions((prev) =>
-                    prev.map((t) =>
-                      selectedTransactions.includes(t.id)
-                        ? { ...t, categoryId: value }
-                        : t
-                    )
-                  );
-
-                  setSelectedTransactions([]);
-                }}
-                defaultValue=""
-                style={{ marginLeft: "10px" }}
-              >
-                <option value="" disabled>
-                  Przenieś do...
-                </option>
-
-                {selectedTransactions.length > 0 &&
-                  (() => {
-                    // sprawdź unikalne kategorie zaznaczonych wpisów
-                    const selectedCategories = [
-                      ...new Set(
-                        transactions
-                          .filter((t) => selectedTransactions.includes(t.id))
-                          .map((t) => t.categoryId)
-                      ),
-                    ];
-                    const firstSelected = transactions.find((t) =>
-                      selectedTransactions.includes(t.id)
-                    );
-
-                    if (!firstSelected) return null;
-
-                    let allowed;
-
-                    if (selectedCategories.length === 1) {
-                      // tylko jedna kategoria zaznaczona → blokujemy ją
-                      allowed = getAllowedCategories(selectedCategories[0]);
-                    } else {
-                      // wiele kategorii → pokazujemy wszystkie zgodne typem
-                      const first = transactions.find((t) =>
-                        selectedTransactions.includes(t.id)
-                      );
-
-                      const currentCategory = categories.find(
-                        (c) => c.id === first.categoryId
-                      );
-
-                      allowed = categories.filter(
-                        (cat) =>
-                          cat.type === currentCategory.type &&
-                          isCategoryActiveInMonth(cat, monthKey)
-                      );
+                <button
+                  onClick={() => {
+                    if (confirm("Na pewno wyczyścić cały miesiąc?")) {
+                      clearMonth();
                     }
-
-                    const currentCategory = categories.find(
-                      (c) => c.id === firstSelected.categoryId
-                    );
-
-                    // jeśli jesteśmy w Level3 → jego parent to Level2
-                    const currentLevel2Id = currentCategory.parentId;
-
-                    // najpierw te z tego samego Level2
-                    const first = allowed.filter((cat) => {
-                      return cat.parentId === currentLevel2Id;
-                    });
-
-                    // potem reszta
-                    const second = allowed.filter((cat) => {
-                      return cat.parentId !== currentLevel2Id;
-                    });
-
-                    const sorted = [...first, ...second];
-
-                    // pogrupuj po Level2
-                    const grouped = {};
-
-                    sorted.forEach((cat) => {
-                      const level2Name = categories.find(
-                        (c) => c.id === cat.parentId
-                      )?.name || "Inne";
-
-                      if (!grouped[level2Name]) {
-                        grouped[level2Name] = [];
-                      }
-
-                      grouped[level2Name].push(cat);
-                    });
-
-                    return Object.entries(grouped).map(([level2Name, cats]) => (
-                      <optgroup key={level2Name} label={level2Name}>
-                        {cats.map((cat) => (
-                          <option key={cat.id} value={cat.id}>
-                            {cat.name}
-                          </option>
-                        ))}
-                      </optgroup>
-                    ));
-                  })()}
-              </select>
-
-              <button
-                onClick={() => setSelectedTransactions([])}
-                style={{ marginLeft: "10px" }}
-              >
-                Anuluj
-              </button>
-              <button
-                onClick={deleteSelectedTransactions}
-                style={{ marginLeft: "10px", color: "red" }}
-              >
-                Usuń zaznaczone
-              </button>
-            </div>
-          )}
-
-        {/* ===== SZYBKI DOSTĘP ===== */}
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-4 space-y-3">
-
-          <h3 className="text-sm font-semibold opacity-70">
-            ⚡ Szybki dostęp
-          </h3>
-
-          {/* WYDATKI */}
-          {getTopCategories("expense", transactions, categories, monthKey).length > 0 && (
-            <div>
-              <div className="text-xs mb-2 text-red-500 font-medium">
-                Wydatki
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                {getTopCategories("expense", transactions, categories, monthKey).map((item) => {
-                  const parent = categories.find(
-                    (c) => c.id === item.category.parentId
-                  );
-
-                  return (
-                    <button
-                      key={item.category.id}
-                      onClick={() => {
-                        const selected = item.category;
-
-                        const level = getCategoryLevel(selected.id);
-
-                        if (level === 3) {
-                          const level2 = categories.find(c => c.id === selected.parentId);
-                          const level1 = categories.find(c => c.id === level2?.parentId);
-
-                          if (level1) setOpenLevel1(level1.id);
-                          if (level2) setOpenLevel2(level2.id);
-                          setOpenLevel3(selected.id);
-                        }
-
-                        if (level === 2) {
-                          const level1 = categories.find(c => c.id === selected.parentId);
-
-                          if (level1) setOpenLevel1(level1.id);
-                          setOpenLevel2(selected.id);
-                        }
-
-                        setTimeout(() => {
-                          const el = document.getElementById(`category-${selected.id}`);
-                          if (el) {
-                            el.scrollIntoView({
-                              behavior: "smooth",
-                              block: "center"
-                            });
-                          }
-                        }, 150);
-                      }}
-                      className="text-xs px-3 py-1 rounded-full bg-red-100 dark:bg-red-900/40 hover:opacity-80 transition"
-                    >
-                      {parent?.name ? parent.name + " → " : ""}
-                      {item.category.name}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* PRZYCHODY */}
-          {getTopCategories("income", transactions, categories, monthKey).length > 0 && (
-            <div>
-              <div className="text-xs mb-2 text-green-500 font-medium">
-                Przychody
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                {getTopCategories("income", transactions, categories, monthKey).map((item) => {
-                  const parent = categories.find(
-                    (c) => c.id === item.category.parentId
-                  );
-
-                  return (
-                    <button
-                      key={item.category.id}
-                      onClick={() => {
-                        const selected = item.category;
-
-                        const level = getCategoryLevel(selected.id);
-
-                        if (level === 3) {
-                          const level2 = categories.find(c => c.id === selected.parentId);
-                          const level1 = categories.find(c => c.id === level2?.parentId);
-
-                          if (level1) setOpenLevel1(level1.id);
-                          if (level2) setOpenLevel2(level2.id);
-                          setOpenLevel3(selected.id);
-                        }
-
-                        if (level === 2) {
-                          const level1 = categories.find(c => c.id === selected.parentId);
-
-                          if (level1) setOpenLevel1(level1.id);
-                          setOpenLevel2(selected.id);
-                        }
-
-                        setTimeout(() => {
-                          const el = document.getElementById(`category-${selected.id}`);
-                          if (el) {
-                            el.scrollIntoView({
-                              behavior: "smooth",
-                              block: "center"
-                            });
-                          }
-                        }, 150);
-                      }}
-                      className="text-xs px-3 py-1 rounded-full bg-red-100 dark:bg-red-900/40 hover:opacity-80 transition"
-                    >
-                      {parent?.name ? parent.name + " → " : ""}
-                      {item.category.name}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-        </div>
-
-        <DndContext
-          collisionDetection={closestCenter}
-          modifiers={[restrictToVerticalAxis]}
-          autoScroll={true}
-          onDragStart={(event) => {
-            if (document.activeElement) {
-              document.activeElement.blur();
-            }
-            const draggedId = event.active.id;
-            setActiveId(draggedId);
-
-            const level = getCategoryLevel(draggedId);
-
-            if (level === 1) {
-              const element = document.getElementById(`category-${draggedId}`);
-              if (element) {
-                const beforeTop = element.getBoundingClientRect().top;
-
-                setOpenLevel1(null);
-
-                requestAnimationFrame(() => {
-                  const afterTop = element.getBoundingClientRect().top;
-                  const diff = afterTop - beforeTop;
-                  window.scrollBy(0, diff);
-                });
-              }
-            }
-
-            if (level === 2) {
-              setOpenLevel2(null);
-            }
-
-            if (level === 3) {
-              setOpenLevel3(null);
-            }
-          }}
-          onDragEnd={(event) => {
-            setActiveId(null);
-            handleDragEnd(event);
-          }}
-          onDragCancel={() => setActiveId(null)}
-        >
-          <SortableContext
-            items={level1Ids}
-            strategy={verticalListSortingStrategy}
-          >
-            {level1Categories.map((level1) => {
-              const isOpenLevel1 = openLevel1 === level1.id;
-              const childrenLevel2 = getChildren(level1.id);
-              const hasLevel2 = childrenLevel2.length > 0;
-
-              const isIncome = level1.type === "income";
-
-              return (
-                <Level1Block
-  key={level1.id}
-
-  level1={level1}
-  openLevel1={openLevel1}
-  setOpenLevel1={setOpenLevel1}
-  getChildren={getChildren}
-
-  formatAmount={formatAmount}
-  getCategorySum={getCategorySum}
-
-  transactions={transactions}
-  categories={categories}
-  monthKey={monthKey}
-
-  activeId={activeId}
-
-  getCategorySetting={getCategorySetting}
-  setCategorySettings={setCategorySettings}
-
-  AddCategoryForm={AddCategoryForm}
-
-  sortModeLevel2={sortModeLevel2}
-  setSortModeLevel2={setSortModeLevel2}
-  sortModeLevel3={sortModeLevel3}
-  setSortModeLevel3={setSortModeLevel3}
-
-  openLevel2={openLevel2}
-  setOpenLevel2={setOpenLevel2}
-  openLevel3={openLevel3}
-  setOpenLevel3={setOpenLevel3}
-
-  closeCategory={closeCategory}
-  reopenCategory={reopenCategory}
-  deleteCategory={deleteCategory}
-  renameCategory={renameCategory}
-
-  addCategoryLevel2={addCategoryLevel2}
-  addCategoryLevel2Income={addCategoryLevel2Income}
-  addCategoryLevel3={addCategoryLevel3}
-
-  addExpense={addExpense}
-  moveTransaction={moveTransaction}
-  createLevel3Category={createLevel3Category}
-
-  getSuggestionsSelector={getSuggestionsSelector}
-  getAllowedCategories={getAllowedCategories}
-  isCategoryActiveInMonth={isCategoryActiveInMonth}
-  sortCategories={sortCategories}
-
-  selectedTransactions={selectedTransactions}
-  toggleTransactionSelection={toggleTransactionSelection}
-  editingTransactionId={editingTransactionId}
-  setEditingTransactionId={setEditingTransactionId}
-  movingTransactionId={movingTransactionId}
-  setMovingTransactionId={setMovingTransactionId}
-  setTransactions={setTransactions}
-
-  suggestionBlacklist={suggestionBlacklist}
-  setSuggestionBlacklist={setSuggestionBlacklist}
-
-  showArchived={showArchived}
-  setShowArchived={setShowArchived}
-
-  resetLevel2Order={resetLevel2Order}
-
-  getMaxDaysInMonth={getMaxDaysInMonth}
-  monthIndex={monthIndex}
-  year={year}
-
-  moveRef={moveRef}
->
-                </Level1Block>
-              );
-            })}
-          </SortableContext>
-          <DragOverlay dropAnimation={null}>
-            {activeId ? (
-              <DragPreview category={activeCategory} />
-            ) : null}
-          </DragOverlay>
-        </DndContext>
-
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-4">
-          <div className="grid grid-cols-[80px_1fr_auto] items-center">
-
-            {/* LEWA STRZAŁKA */}
-            <div className="flex justify-start">
-              <button
-                onClick={previousMonth}
-                className="group w-11 h-11 flex items-center justify-center rounded-full
-           bg-gradient-to-br from-gray-100 to-gray-200
-           dark:from-gray-700 dark:to-gray-600
-           shadow-md hover:shadow-lg
-           active:scale-95
-           transition-all duration-200"
-              >
-                <svg
-                  className="w-5 h-5 text-gray-700 dark:text-gray-200 group-hover:-translate-x-1 transition-transform duration-200"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.5"
-                  viewBox="0 0 24 24"
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-                </svg>
-              </button>
-            </div>
-
-            {/* ŚRODEK */}
-            <h1 className="text-xl font-semibold text-center">
-              {months[monthIndex]} {year}
-            </h1>
-
-            {/* PRAWA STRONA */}
-            <div className="flex justify-end items-center gap-3">
-              <button
-                onClick={nextMonth}
-                className="group w-11 h-11 flex items-center justify-center rounded-full
-           bg-gradient-to-br from-gray-100 to-gray-200
-           dark:from-gray-700 dark:to-gray-600
-           shadow-md hover:shadow-lg
-           active:scale-95
-           transition-all duration-200"
-              >
-                <svg
-                  className="w-5 h-5 text-gray-700 dark:text-gray-200 group-hover:translate-x-1 transition-transform duration-200"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.5"
-                  viewBox="0 0 24 24"
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                </svg>
-              </button>
-
-              <button
-                onClick={() => {
-                  if (confirm("Na pewno wyczyścić cały miesiąc?")) {
-                    clearMonth();
-                  }
-                }}
-                className="w-11 h-11 flex items-center justify-center rounded-full
+                  }}
+                  className="w-11 h-11 flex items-center justify-center rounded-full
              bg-red-100 hover:bg-red-200
              dark:bg-red-900 dark:hover:bg-red-800
              transition-all duration-200 active:scale-95"
-              >
-                <svg
-                  className="w-6 h-6 text-red-600 dark:text-red-300"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  viewBox="0 0 24 24"
                 >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M6 7h12M9 7V5h6v2m-7 0v12m4-12v12m4-12v12M5 7h14l-1 14H6L5 7z"
-                  />
-                </svg>
-              </button>
+                  <svg
+                    className="w-6 h-6 text-red-600 dark:text-red-300"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M6 7h12M9 7V5h6v2m-7 0v12m4-12v12m4-12v12M5 7h14l-1 14H6L5 7z"
+                    />
+                  </svg>
+                </button>
+                <button
+                  onClick={clearAllHistory}
+                  className="ml-3 px-3 py-1 bg-red-600 text-white rounded text-sm"
+                >
+                  Reset całości
+                </button>
+                {isMounted && (
+                  <button
+                    onClick={() => setDarkMode(!darkMode)}
+                    className="ml-2 px-3 py-1 rounded bg-gray-200 dark:bg-gray-700"
+                  >
+                    {darkMode ? "☀️" : "🌙"}
+                  </button>
+                )}
+              </div>
+
+            </div>
+          </div>
+          {/* DASHBOARD */}
+          <h2 className="text-xl font-semibold mb-2">
+            Dashboard
+          </h2>
+          <div className="grid grid-cols-2 gap-4 auto-rows-fr">
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-4">
+              <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-sm opacity-70">
+                <div className="flex justify-between items-center">
+                  <span>Liczba transakcji</span>
+                  <span>
+                    {
+                      transactions.filter(t => isTransactionInMonth(t.date)).length
+                    }
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span>Największy wydatek</span>
+                  <span>
+                    {
+                      Math.max(
+                        0,
+                        ...transactions
+                          .filter(
+                            t =>
+                              isTransactionInMonth(t.date) &&
+                              categories.find(c => c.id === t.categoryId)?.type === "expense"
+                          )
+                          .map(t => t.amount)
+                      ).toFixed(2)
+                    } zł
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span>Średni wydatek</span>
+                  <span>
+                    {
+                      (() => {
+                        const expenses = transactions.filter(
+                          t =>
+                            isTransactionInMonth(t.date) &&
+                            categories.find(c => c.id === t.categoryId)?.type === "expense"
+                        );
+
+                        if (expenses.length === 0) return "0.00";
+
+                        const sum = expenses.reduce((s, t) => s + t.amount, 0);
+                        return (sum / expenses.length).toFixed(2);
+                      })()
+                    } zł
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span>Największa kategoria</span>
+                  <span>
+                    {
+                      (() => {
+                        const expenses = transactions.filter(
+                          t =>
+                            isTransactionInMonth(t.date) &&
+                            categories.find(c => c.id === t.categoryId)?.type === "expense"
+                        );
+
+                        if (expenses.length === 0) return "-";
+
+                        const sums = {};
+
+                        expenses.forEach(t => {
+                          sums[t.categoryId] = (sums[t.categoryId] || 0) + t.amount;
+                        });
+
+                        const top = Object.entries(sums).sort((a, b) => b[1] - a[1])[0];
+
+                        const cat = categories.find(c => c.id === top[0]);
+
+                        return cat?.name || "-";
+                      })()
+                    }
+                  </span>
+                </div>
+              </div>
             </div>
 
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-4">
+              <h3 className="text-sm font-semibold opacity-70 mt-4">
+                Top kategorie wydatków
+              </h3>
+
+              <div className="mt-2 space-y-1 text-sm">
+                {topExpenseCategories.map((item, index) => {
+                  const percent = Math.round((item.amount / totalExpense) * 100);
+
+                  return (
+                    <div key={item.category?.id} className="space-y-1">
+                      <div className="flex justify-between text-sm">
+                        <span>
+                          {index + 1}. {item.category?.name}
+                        </span>
+
+                        <span className="text-red-500">
+                          {formatAmount(item.amount)} zł ({percent}%)
+                        </span>
+                      </div>
+
+                      <div className="w-full bg-gray-200 dark:bg-gray-700 h-2 rounded">
+                        <div
+                          className="bg-red-500 h-2 rounded"
+                          style={{ width: `${Math.max(percent, 5)}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-4">
+              <div className="flex justify-between items-center">
+                <div className="flex items-center gap-2 text-green-600">
+                  <Icon name="plusCircle" />
+                  <span>{incomeCategory?.name}</span>
+                </div>
+                <span className="text-green-600">
+                  {formatAmount(getCategorySum("income", transactions, categories))} zł
+                </span>
+              </div>
+
+              <div className="flex justify-between items-center">
+                <div className="flex items-center gap-2 text-red-600">
+                  <Icon name="minusCircle" />
+                  <span>{expenseCategory?.name}</span>
+                </div>
+                <span className="text-red-600">
+                  {formatAmount(totalExpense)} zł
+                </span>
+              </div>
+              <div className="flex justify-between border-t pt-2 font-bold">
+                <span>Bilans:</span>
+                <span className={balance >= 0 ? "text-green-600" : "text-red-600"}>
+                  {formatAmount(balance)} zł
+                </span>
+              </div>
+            </div>
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-4">
+              <h3 className="text-sm font-semibold opacity-70 mb-2">
+                Przychody vs Wydatki
+              </h3>
+
+              <div style={{ width: "100%", height: 200 }}>
+                <ResponsiveContainer>
+                  <PieChart>
+                    <Pie
+                      data={pieData}
+                      dataKey="value"
+                      innerRadius={40}
+                      outerRadius={70}
+                      paddingAngle={3}
+                      animationDuration={600}
+                      animationEasing="ease-out"
+                    >
+                      <Cell fill="#22c55e" />
+                      <Cell fill="#ef4444" />
+                    </Pie>
+
+                    <Tooltip />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-4">
+              <h3 className="text-sm font-semibold opacity-70 mb-2">
+                Historia przychodów (6 miesięcy)
+              </h3>
+
+              <div style={{ width: "100%", height: 200 }}>
+                <ResponsiveContainer>
+                  <LineChart data={last6MonthsIncome}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="name" />
+                    <YAxis />
+                    <Tooltip />
+
+                    <Line
+                      type="monotone"
+                      dataKey="value"
+                      stroke="#22c55e"
+                      strokeWidth={3}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-4">
+              <h3 className="text-sm font-semibold opacity-70 mb-2">
+                Historia wydatków (6 miesięcy)
+              </h3>
+
+              <div style={{ width: "100%", height: 200 }}>
+                <ResponsiveContainer>
+                  <LineChart data={last6Months}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="name" />
+                    <YAxis />
+                    <Tooltip />
+
+                    <Line
+                      type="monotone"
+                      dataKey="value"
+                      stroke="#ef4444"
+                      strokeWidth={3}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-4">
+              <h3 className="text-sm font-semibold opacity-70 mb-2">
+                Historia bilansu (6 miesięcy)
+              </h3>
+
+              <div style={{ width: "100%", height: 200 }}>
+                <ResponsiveContainer>
+                  <AreaChart data={last6MonthsBalance}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="name" />
+                    <YAxis />
+                    <Tooltip />
+
+                    <ReferenceLine y={0} stroke="#888" />
+
+                    <Area
+                      type="monotone"
+                      dataKey="value"
+                      stroke="#3b82f6"
+                      fill="#22c55e"
+                      fillOpacity={0.4}
+                    />
+
+                    <Line
+                      type="monotone"
+                      dataKey="value"
+                      stroke="#3b82f6"
+                      strokeWidth={3}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-4">
+              <h3 className="text-sm font-semibold opacity-70 mb-2">
+                Trend przychodów
+              </h3>
+
+              <div className="flex justify-between text-sm">
+                <span>Poprzedni miesiąc</span>
+                <span>{formatAmount(previousMonthIncome)} zł</span>
+              </div>
+
+              <div className="flex justify-between text-sm">
+                <span>Ten miesiąc</span>
+                <span>
+                  {formatAmount(
+                    getCategorySum("income", transactions, categories)
+                  )} zł
+                </span>
+              </div>
+
+              <div className="flex justify-between border-t pt-2 mt-2 font-bold">
+                <span>Zmiana</span>
+
+                <span
+                  className={
+                    incomeDifference > 0
+                      ? "text-green-500"
+                      : incomeDifference < 0
+                        ? "text-red-500"
+                        : ""
+                  }
+                >
+                  {formatAmount(incomeDifference)} zł
+                  {" "}
+                  ({incomePercentChange.toFixed(1)}%)
+                </span>
+              </div>
+            </div>
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-4">
+              <h3 className="text-sm font-semibold opacity-70 mb-2">
+                Trend wydatków
+              </h3>
+
+              <div className="flex justify-between text-sm">
+                <span>Poprzedni miesiąc</span>
+                <span>{formatAmount(previousMonthExpense)} zł</span>
+              </div>
+
+              <div className="flex justify-between text-sm">
+                <span>Ten miesiąc</span>
+                <span>{formatAmount(totalExpense)} zł</span>
+              </div>
+              <div className="flex justify-between border-t pt-2 mt-2 font-bold">
+                <span>Zmiana</span>
+
+                <span
+                  className={
+                    expenseDifference > 0
+                      ? "text-red-500"
+                      : expenseDifference < 0
+                        ? "text-green-500"
+                        : ""
+                  }
+                >
+                  {formatAmount(expenseDifference)} zł
+                  {" "}
+                  ({expensePercentChange.toFixed(1)}%)
+                </span>
+              </div>
+            </div>
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-4">
+              <h3 className="text-sm font-semibold opacity-70 mb-2">
+                Trend bilansu
+              </h3>
+
+              <div className="flex justify-between text-sm">
+                <span>Poprzedni miesiąc</span>
+                <span>{formatAmount(previousMonthBalance)} zł</span>
+              </div>
+
+              <div className="flex justify-between text-sm">
+                <span>Ten miesiąc</span>
+                <span>{formatAmount(currentBalance)} zł</span>
+              </div>
+
+              <div className="flex justify-between border-t pt-2 mt-2 font-bold">
+                <span>Zmiana</span>
+
+                <span
+                  className={
+                    balanceDifference > 0
+                      ? "text-green-500"
+                      : balanceDifference < 0
+                        ? "text-red-500"
+                        : ""
+                  }
+                >
+                  {formatAmount(balanceDifference)} zł
+                  {" "}
+                  ({balancePercentChange.toFixed(1)}%)
+                </span>
+              </div>
+            </div>
+          </div>
+
+
+
+          {selectedTransactions.length > 0 && (
+              <div style={{ padding: "10px", background: "#eef", marginBottom: "10px" }}>
+                <span>Zaznaczone: {selectedTransactions.length}</span>
+
+                {new Set(
+                  transactions
+                    .filter((t) => selectedTransactions.includes(t.id))
+                    .map((t) => categories.find((c) => c.id === t.categoryId)?.type)
+                ).size === 1 && (
+                    <select
+  onChange={async (e) => {
+    const value = e.target.value;
+    if (!value) return;
+
+    const { error } = await supabase
+      .from("transactions")
+      .update({ category_id: value })
+      .in("id", selectedTransactions);
+
+    if (error) {
+      console.error("Błąd przenoszenia zaznaczonych transakcji:", error);
+      alert("Nie udało się przenieść zaznaczonych transakcji.");
+      return;
+    }
+
+    setTransactions((prev) =>
+      prev.map((t) =>
+        selectedTransactions.includes(t.id)
+          ? { ...t, categoryId: value, category_id: value }
+          : t
+      )
+    );
+
+    setSelectedTransactions([]);
+  }}
+  defaultValue=""
+  style={{ marginLeft: "10px" }}
+>
+                      <option value="" disabled>
+                        Przenieś do...
+                      </option>
+
+                      {selectedTransactions.length > 0 && (
+                        (() => {
+
+                          const selectedCategories = [
+                            ...new Set(
+                              transactions
+                                .filter((t) => selectedTransactions.includes(t.id))
+                                .map((t) => t.categoryId)
+                            ),
+                          ];
+                          const firstSelected = transactions.find((t) =>
+                            selectedTransactions.includes(t.id)
+                          );
+
+                          const sameType =
+                            new Set(
+                              transactions
+                                .filter((t) => selectedTransactions.includes(t.id))
+                                .map((t) => categories.find((c) => c.id === t.categoryId)?.type)
+                            ).size === 1;
+
+                          if (!firstSelected) return null;
+
+                                                    let allowed;
+
+                          if (selectedCategories.length === 1) {
+
+                            allowed = getAllowedCategories(selectedCategories[0]);
+                          } else {
+
+                            const first = transactions.find((t) =>
+                              selectedTransactions.includes(t.id)
+                            );
+
+                            const currentCategory = categories.find(
+                              (c) => c.id === first.categoryId
+                            );
+
+                            allowed = categories.filter((cat) => {
+                              if (cat.type !== currentCategory.type) return false;
+                              if (!isCategoryActiveInMonth(cat, monthKey)) return false;
+                              if (cat.id === "income" || cat.id === "expense") return false;
+
+                              const hasChildren = categories.some(
+                                (child) => child.parentId === cat.id
+                              );
+
+                              return !hasChildren;
+                            });
+                          }
+
+                          allowed = allowed.filter((cat) => {
+                            const hasChildren = categories.some(
+                              (child) => child.parentId === cat.id
+                            );
+
+                            return !hasChildren;
+                          });
+
+                          const currentCategory = categories.find(
+                            (c) => c.id === firstSelected.categoryId
+                          );
+
+                          const currentLevel2Id = currentCategory.parentId;
+
+                          const first = allowed.filter((cat) => {
+                            return cat.parentId === currentLevel2Id;
+                          });
+
+                          const second = allowed.filter((cat) => {
+                            return cat.parentId !== currentLevel2Id;
+                          });
+
+                          const sorted = [...first, ...second];
+
+                          const grouped = {};
+
+                          sorted.forEach((cat) => {
+                            const level2Name = categories.find(
+                              (c) => c.id === cat.parentId
+                            )?.name || "Inne";
+
+                            if (!grouped[level2Name]) {
+                              grouped[level2Name] = [];
+                            }
+
+                            grouped[level2Name].push(cat);
+                          });
+
+                          return Object.entries(grouped).map(([level2Name, cats]) => (
+                            <optgroup key={level2Name} label={level2Name}>
+                              {cats.map((cat) => (
+                                <option key={cat.id} value={cat.id}>
+                                  {cat.name}
+                                </option>
+                              ))}
+                            </optgroup>
+                          ));
+                                                })()
+                      )}
+                    </select>
+                  )}
+
+                <button
+                  onClick={() => setSelectedTransactions([])}
+                  style={{ marginLeft: "10px" }}
+                >
+                  Anuluj
+                </button>
+                <button
+                  onClick={deleteSelectedTransactions}
+                  style={{ marginLeft: "10px", color: "red" }}
+                >
+                  Usuń zaznaczone
+                </button>
+              </div>
+            )}
+
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-4 space-y-3">
+
+            <h3 className="text-sm font-semibold opacity-70">
+              ⚡ Szybki dostęp
+            </h3>
+
+            {/* WYDATKI */}
+            {getTopCategories("expense", transactions, categories).length > 0 && (
+              <div>
+                <div className="text-xs mb-2 text-red-500 font-medium">
+                  Wydatki
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {getTopCategories("expense", transactions, categories, monthKey).map((item) => {
+                    const parent = categories.find(
+                      (c) => c.id === item.category.parentId
+                    );
+
+                    return (
+                      <button
+                        key={item.category.id}
+                        onClick={() => {
+                          const selected = item.category;
+
+                          const level = getCategoryLevel(selected.id);
+
+                          if (level === 3) {
+                            const level2 = categories.find(c => c.id === selected.parentId);
+                            const level1 = categories.find(c => c.id === level2?.parentId);
+
+                            if (level1) setOpenLevel1(level1.id);
+                            if (level2) setOpenLevel2(level2.id);
+                            setOpenLevel3(selected.id);
+                          }
+
+                          if (level === 2) {
+                            const level1 = categories.find(c => c.id === selected.parentId);
+
+                            if (level1) setOpenLevel1(level1.id);
+                            setOpenLevel2(selected.id);
+                          }
+
+                          setTimeout(() => {
+                            const el = document.getElementById(`category-${selected.id}`);
+                            if (el) {
+                              el.scrollIntoView({
+                                behavior: "smooth",
+                                block: "center"
+                              });
+                            }
+                          }, 150);
+                        }}
+                        className="text-xs px-3 py-1 rounded-full bg-red-100 dark:bg-red-900/40 hover:opacity-80 transition"
+                      >
+                        {parent?.name ? parent.name + " → " : ""}
+                        {item.category.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* PRZYCHODY */}
+            {getTopCategories("income", transactions, categories).length > 0 && (
+              <div>
+                <div className="text-xs mb-2 text-green-500 font-medium">
+                  Przychody
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {getTopCategories("income", transactions, categories, monthKey).map((item) => {
+                    const parent = categories.find(
+                      (c) => c.id === item.category.parentId
+                    );
+
+                    return (
+                      <button
+                        key={item.category.id}
+                        onClick={() => {
+                          const selected = item.category;
+
+                          const level = getCategoryLevel(selected.id);
+
+                          if (level === 3) {
+                            const level2 = categories.find(c => c.id === selected.parentId);
+                            const level1 = categories.find(c => c.id === level2?.parentId);
+
+                            if (level1) setOpenLevel1(level1.id);
+                            if (level2) setOpenLevel2(level2.id);
+                            setOpenLevel3(selected.id);
+                          }
+
+                          if (level === 2) {
+                            const level1 = categories.find(c => c.id === selected.parentId);
+
+                            if (level1) setOpenLevel1(level1.id);
+                            setOpenLevel2(selected.id);
+                          }
+
+                          setTimeout(() => {
+                            const el = document.getElementById(`category-${selected.id}`);
+                            if (el) {
+                              el.scrollIntoView({
+                                behavior: "smooth",
+                                block: "center"
+                              });
+                            }
+                          }, 150);
+                        }}
+                        className="text-xs px-3 py-1 rounded-full bg-red-100 dark:bg-red-900/40 hover:opacity-80 transition"
+                      >
+                        {parent?.name ? parent.name + " → " : ""}
+                        {item.category.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+          </div>
+
+          <DndContext
+            collisionDetection={closestCenter}
+            modifiers={[restrictToVerticalAxis]}
+            autoScroll={true}
+            onDragStart={(event) => {
+              if (document.activeElement) {
+                document.activeElement.blur();
+              }
+              const draggedId = event.active.id;
+              setActiveId(draggedId);
+
+              const level = getCategoryLevel(draggedId);
+
+              if (level === 1) {
+                const element = document.getElementById(`category-${draggedId}`);
+                if (element) {
+                  const beforeTop = element.getBoundingClientRect().top;
+
+                  setOpenLevel1(null);
+
+                  requestAnimationFrame(() => {
+                    const afterTop = element.getBoundingClientRect().top;
+                    const diff = afterTop - beforeTop;
+                    window.scrollBy(0, diff);
+                  });
+                }
+              }
+
+              if (level === 2) {
+                setOpenLevel2(null);
+              }
+
+              if (level === 3) {
+                setOpenLevel3(null);
+              }
+            }}
+            onDragEnd={(event) => {
+              setActiveId(null);
+              handleDragEnd(event);
+            }}
+            onDragCancel={() => setActiveId(null)}
+          >
+            <SortableContext
+              items={level1Ids}
+              strategy={verticalListSortingStrategy}
+            >
+              {level1Categories.map((level1) => {
+                const isOpenLevel1 = openLevel1 === level1.id;
+                const childrenLevel2 = getChildren(level1.id);
+                const hasLevel2 = childrenLevel2.length > 0;
+
+                const isIncome = level1.type === "income";
+
+                return (
+                  <Level1Block
+                    key={level1.id}
+
+                    level1={level1}
+                    openLevel1={openLevel1}
+                    setOpenLevel1={setOpenLevel1}
+                    getChildren={getChildren}
+
+                    formatAmount={formatAmount}
+                    getCategorySum={getCategorySum}
+
+                    transactions={transactions}
+                    categories={categories}
+
+                    activeId={activeId}
+
+                    getCategorySetting={getCategorySetting}
+                    setCategorySettings={setCategorySettings}
+
+                    AddCategoryForm={AddCategoryForm}
+
+                    sortModeLevel2={sortModeLevel2}
+                    setSortModeLevel2={setSortModeLevel2}
+                    sortModeLevel3={sortModeLevel3}
+                    setSortModeLevel3={setSortModeLevel3}
+
+                    openLevel2={openLevel2}
+                    setOpenLevel2={setOpenLevel2}
+                    openLevel3={openLevel3}
+                    setOpenLevel3={setOpenLevel3}
+
+                    closeCategory={closeCategory}
+                    reopenCategory={reopenCategory}
+                    deleteCategory={deleteCategory}
+                    renameCategory={renameCategory}
+
+                    addCategoryLevel2={addCategoryLevel2}
+                    addCategoryLevel2Income={addCategoryLevel2Income}
+                    addCategoryLevel3={addCategoryLevel3}
+
+                    addExpense={addExpense}
+                    moveTransaction={moveTransaction}
+                    createLevel3Category={createLevel3Category}
+
+                    getSuggestionsSelector={getSuggestionsSelector}
+                    getAllowedCategories={getAllowedCategories}
+                    isCategoryActiveInMonth={isCategoryActiveInMonth}
+                    sortCategories={sortCategories}
+
+                    selectedTransactions={selectedTransactions}
+                    toggleTransactionSelection={toggleTransactionSelection}
+                    editingTransactionId={editingTransactionId}
+                    setEditingTransactionId={setEditingTransactionId}
+                    movingTransactionId={movingTransactionId}
+                    setMovingTransactionId={setMovingTransactionId}
+                    setTransactions={setTransactions}
+
+                    suggestionBlacklist={suggestionBlacklist}
+                    setSuggestionBlacklist={setSuggestionBlacklist}
+
+                    showArchived={showArchived}
+                    setShowArchived={setShowArchived}
+
+                    resetLevel2Order={resetLevel2Order}
+
+                    getMaxDaysInMonth={getMaxDaysInMonth}
+                    monthIndex={monthIndex}
+                    year={year}
+
+                    moveRef={moveRef}
+                  >
+                  </Level1Block>
+                );
+              })}
+            </SortableContext>
+            <DragOverlay dropAnimation={null}>
+              {activeId ? (
+                <DragPreview category={activeCategory} />
+              ) : null}
+            </DragOverlay>
+          </DndContext>
+
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-4">
+            <div className="grid grid-cols-[80px_1fr_auto] items-center">
+
+              {/* LEWA STRZAŁKA */}
+              <div className="flex justify-start">
+                <button
+                  onClick={previousMonth}
+                  className="group w-11 h-11 flex items-center justify-center rounded-full
+           bg-gradient-to-br from-gray-100 to-gray-200
+           dark:from-gray-700 dark:to-gray-600
+           shadow-md hover:shadow-lg
+           active:scale-95
+           transition-all duration-200"
+                >
+                  <svg
+                    className="w-5 h-5 text-gray-700 dark:text-gray-200 group-hover:-translate-x-1 transition-transform duration-200"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                  </svg>
+                </button>
+              </div>
+
+              {/* ŚRODEK */}
+              <h1 className="text-xl font-semibold text-center">
+                {months[monthIndex]} {year}
+              </h1>
+
+              {/* PRAWA STRONA */}
+              <div className="flex justify-end items-center gap-3">
+                <button
+                  onClick={nextMonth}
+                  className="group w-11 h-11 flex items-center justify-center rounded-full
+           bg-gradient-to-br from-gray-100 to-gray-200
+           dark:from-gray-700 dark:to-gray-600
+           shadow-md hover:shadow-lg
+           active:scale-95
+           transition-all duration-200"
+                >
+                  <svg
+                    className="w-5 h-5 text-gray-700 dark:text-gray-200 group-hover:translate-x-1 transition-transform duration-200"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+
+                <button
+                  onClick={() => {
+                    if (confirm("Na pewno wyczyścić cały miesiąc?")) {
+                      clearMonth();
+                    }
+                  }}
+                  className="w-11 h-11 flex items-center justify-center rounded-full
+             bg-red-100 hover:bg-red-200
+             dark:bg-red-900 dark:hover:bg-red-800
+             transition-all duration-200 active:scale-95"
+                >
+                  <svg
+                    className="w-6 h-6 text-red-600 dark:text-red-300"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M6 7h12M9 7V5h6v2m-7 0v12m4-12v12m4-12v12M5 7h14l-1 14H6L5 7z"
+                    />
+                  </svg>
+                </button>
+              </div>
+
+            </div>
           </div>
         </div>
-      </div>
-    </main>
+      </main>
+    </BudgetProvider>
   );
 }
 

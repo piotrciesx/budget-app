@@ -10,6 +10,7 @@ export default function Level3Block({
     transactions,
     monthKey,
     monthIndex,
+    year,
     setTransactions,
     selectedTransactions,
     toggleTransactionSelection,
@@ -27,17 +28,16 @@ export default function Level3Block({
 }) {
 
     const level3Transactions = transactions
-        .filter(
-            (t) =>
-                t.categoryId === level3.id &&
-                t.monthKey === monthKey
-        )
-        .sort((a, b) => {
-            if (a.day && b.day) return a.day - b.day
-            if (a.day && !b.day) return -1
-            if (!a.day && b.day) return 1
-            return 0
-        })
+    .filter((t) => {
+        const d = new Date(t.date);
+
+        return (
+            t.categoryId === level3.id &&
+            d.getFullYear() === year &&
+            d.getMonth() === monthIndex
+        );
+    })
+    .sort((a, b) => new Date(a.date) - new Date(b.date));
 
     const deleteTransaction = (id) => {
         setTransactions(prev => prev.filter(t => t.id !== id));

@@ -23,17 +23,15 @@ function Level1Transactions({
 }) {
 
   const level1Transactions = transactions
-    .filter(
-      (t) =>
-        t.categoryId === level1.id &&
-        t.monthKey === monthKey
-    )
-    .sort((a, b) => {
-      if (a.day && b.day) return a.day - b.day
-      if (a.day && !b.day) return -1
-      if (!a.day && b.day) return 1
-      return 0
-    })
+  .filter((t) => {
+    const d = new Date(t.date);
+
+    return (
+      t.categoryId === level1.id &&
+      d.getMonth() === monthIndex
+    );
+  })
+  .sort((a, b) => new Date(a.date) - new Date(b.date))
 
   return (
     <>

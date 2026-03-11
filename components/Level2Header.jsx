@@ -9,6 +9,7 @@ export default function Level2Header({
   categories,
   openLevel2,
   setOpenLevel2,
+  setOpenLevel3,
   closeCategory,
   reopenCategory,
   deleteCategory,
@@ -37,9 +38,13 @@ export default function Level2Header({
       <button
         type="button"
         onClick={() => {
-          const newValue = isOpenLevel2 ? null : level2.id;
-          setOpenLevel2(newValue);
-        }}
+  const newValue = isOpenLevel2 ? null : level2.id;
+  setOpenLevel2(newValue);
+
+  if (newValue === null) {
+    setOpenLevel3(null);
+  }
+}}
         className="text-left flex-1"
       >
         {level2.name} — {formatAmount(
