@@ -49,6 +49,8 @@ import {
   AreaChart
 } from "recharts";
 
+import LoginButton from "@/components/LoginButton";
+
 export default function Home() {
   const [user, setUser] = useState(null);
   const [monthIndex, setMonthIndex] = useState(new Date().getMonth());
@@ -283,26 +285,43 @@ export default function Home() {
   const getMaxDaysInMonth = (year, monthIndex) => {
     return new Date(year, monthIndex + 1, 0).getDate();
   };
-  const isCategoryActiveInMonth = (category, monthKey) => {
+  const isCategoryActiveInMonth = (category, year, monthIndex) => {
 
-    if (category.activePeriods) {
-      return category.activePeriods.some(period => {
-        const afterStart = monthKey >= period.start;
-        const beforeEnd = !period.end || monthKey <= period.end;
-        return afterStart && beforeEnd;
-      });
+  const periods =
+    Array.isArray(category.activePeriods) && category.activePeriods.length > 0
+      ? category.activePeriods
+      : Array.isArray(category.active_periods) && category.active_periods.length > 0
+        ? category.active_periods
+        : null;
+
+  if (!periods) return true;
+
+  const currentYear = year;
+  const currentMonth = monthIndex;
+
+  return periods.some((period) => {
+
+    const [startYear, startMonth] = period.start.split("-").map(Number);
+    const startMonthIndex = startMonth - 1;
+
+    const startOK =
+      currentYear > startYear ||
+      (currentYear === startYear && currentMonth >= startMonthIndex);
+
+    let endOK = true;
+
+    if (period.end) {
+      const [endYear, endMonth] = period.end.split("-").map(Number);
+      const endMonthIndex = endMonth - 1;
+
+      endOK =
+        currentYear < endYear ||
+        (currentYear === endYear && currentMonth < endMonthIndex);
     }
 
-    if (category.startMonth && monthKey < category.startMonth) {
-      return false;
-    }
-
-    if (category.endMonth && monthKey > category.endMonth) {
-      return false;
-    }
-
-    return true;
-  };
+    return startOK && endOK;
+  });
+};
 
   useEffect(() => {
     setSelectedTransactions([]);
@@ -748,9 +767,7 @@ export default function Home() {
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
                   </svg>
                 </button>
-                <button onClick={loginWithGoogle}>
-                  🔑 Zaloguj się przez Google
-                </button>
+                <LoginButton user={user} />
 
                 <button
                   onClick={() => {
@@ -1149,164 +1166,164 @@ export default function Home() {
 
 
           {selectedTransactions.length > 0 && (
-              <div style={{ padding: "10px", background: "#eef", marginBottom: "10px" }}>
-                <span>Zaznaczone: {selectedTransactions.length}</span>
+            <div style={{ padding: "10px", background: "#eef", marginBottom: "10px" }}>
+              <span>Zaznaczone: {selectedTransactions.length}</span>
 
-                {new Set(
-                  transactions
-                    .filter((t) => selectedTransactions.includes(t.id))
-                    .map((t) => categories.find((c) => c.id === t.categoryId)?.type)
-                ).size === 1 && (
-                    <select
-  onChange={async (e) => {
-    const value = e.target.value;
-    if (!value) return;
+              {new Set(
+                transactions
+                  .filter((t) => selectedTransactions.includes(t.id))
+                  .map((t) => categories.find((c) => c.id === t.categoryId)?.type)
+              ).size === 1 && (
+                  <select
+                    onChange={async (e) => {
+                      const value = e.target.value;
+                      if (!value) return;
 
-    const { error } = await supabase
-      .from("transactions")
-      .update({ category_id: value })
-      .in("id", selectedTransactions);
+                      const { error } = await supabase
+                        .from("transactions")
+                        .update({ category_id: value })
+                        .in("id", selectedTransactions);
 
-    if (error) {
-      console.error("Błąd przenoszenia zaznaczonych transakcji:", error);
-      alert("Nie udało się przenieść zaznaczonych transakcji.");
-      return;
-    }
+                      if (error) {
+                        console.error("Błąd przenoszenia zaznaczonych transakcji:", error);
+                        alert("Nie udało się przenieść zaznaczonych transakcji.");
+                        return;
+                      }
 
-    setTransactions((prev) =>
-      prev.map((t) =>
-        selectedTransactions.includes(t.id)
-          ? { ...t, categoryId: value, category_id: value }
-          : t
-      )
-    );
+                      setTransactions((prev) =>
+                        prev.map((t) =>
+                          selectedTransactions.includes(t.id)
+                            ? { ...t, categoryId: value, category_id: value }
+                            : t
+                        )
+                      );
 
-    setSelectedTransactions([]);
-  }}
-  defaultValue=""
-  style={{ marginLeft: "10px" }}
->
-                      <option value="" disabled>
-                        Przenieś do...
-                      </option>
+                      setSelectedTransactions([]);
+                    }}
+                    defaultValue=""
+                    style={{ marginLeft: "10px" }}
+                  >
+                    <option value="" disabled>
+                      Przenieś do...
+                    </option>
 
-                      {selectedTransactions.length > 0 && (
-                        (() => {
+                    {selectedTransactions.length > 0 && (
+                      (() => {
 
-                          const selectedCategories = [
-                            ...new Set(
-                              transactions
-                                .filter((t) => selectedTransactions.includes(t.id))
-                                .map((t) => t.categoryId)
-                            ),
-                          ];
-                          const firstSelected = transactions.find((t) =>
+                        const selectedCategories = [
+                          ...new Set(
+                            transactions
+                              .filter((t) => selectedTransactions.includes(t.id))
+                              .map((t) => t.categoryId)
+                          ),
+                        ];
+                        const firstSelected = transactions.find((t) =>
+                          selectedTransactions.includes(t.id)
+                        );
+
+                        const sameType =
+                          new Set(
+                            transactions
+                              .filter((t) => selectedTransactions.includes(t.id))
+                              .map((t) => categories.find((c) => c.id === t.categoryId)?.type)
+                          ).size === 1;
+
+                        if (!firstSelected) return null;
+
+                        let allowed;
+
+                        if (selectedCategories.length === 1) {
+
+                          allowed = getAllowedCategories(selectedCategories[0]);
+                        } else {
+
+                          const first = transactions.find((t) =>
                             selectedTransactions.includes(t.id)
                           );
 
-                          const sameType =
-                            new Set(
-                              transactions
-                                .filter((t) => selectedTransactions.includes(t.id))
-                                .map((t) => categories.find((c) => c.id === t.categoryId)?.type)
-                            ).size === 1;
+                          const currentCategory = categories.find(
+                            (c) => c.id === first.categoryId
+                          );
 
-                          if (!firstSelected) return null;
+                          allowed = categories.filter((cat) => {
+                            if (cat.type !== currentCategory.type) return false;
+                            if (!isCategoryActiveInMonth(cat, monthKey)) return false;
+                            if (cat.id === "income" || cat.id === "expense") return false;
 
-                                                    let allowed;
-
-                          if (selectedCategories.length === 1) {
-
-                            allowed = getAllowedCategories(selectedCategories[0]);
-                          } else {
-
-                            const first = transactions.find((t) =>
-                              selectedTransactions.includes(t.id)
-                            );
-
-                            const currentCategory = categories.find(
-                              (c) => c.id === first.categoryId
-                            );
-
-                            allowed = categories.filter((cat) => {
-                              if (cat.type !== currentCategory.type) return false;
-                              if (!isCategoryActiveInMonth(cat, monthKey)) return false;
-                              if (cat.id === "income" || cat.id === "expense") return false;
-
-                              const hasChildren = categories.some(
-                                (child) => child.parentId === cat.id
-                              );
-
-                              return !hasChildren;
-                            });
-                          }
-
-                          allowed = allowed.filter((cat) => {
                             const hasChildren = categories.some(
                               (child) => child.parentId === cat.id
                             );
 
                             return !hasChildren;
                           });
+                        }
 
-                          const currentCategory = categories.find(
-                            (c) => c.id === firstSelected.categoryId
+                        allowed = allowed.filter((cat) => {
+                          const hasChildren = categories.some(
+                            (child) => child.parentId === cat.id
                           );
 
-                          const currentLevel2Id = currentCategory.parentId;
+                          return !hasChildren;
+                        });
 
-                          const first = allowed.filter((cat) => {
-                            return cat.parentId === currentLevel2Id;
-                          });
+                        const currentCategory = categories.find(
+                          (c) => c.id === firstSelected.categoryId
+                        );
 
-                          const second = allowed.filter((cat) => {
-                            return cat.parentId !== currentLevel2Id;
-                          });
+                        const currentLevel2Id = currentCategory.parentId;
 
-                          const sorted = [...first, ...second];
+                        const first = allowed.filter((cat) => {
+                          return cat.parentId === currentLevel2Id;
+                        });
 
-                          const grouped = {};
+                        const second = allowed.filter((cat) => {
+                          return cat.parentId !== currentLevel2Id;
+                        });
 
-                          sorted.forEach((cat) => {
-                            const level2Name = categories.find(
-                              (c) => c.id === cat.parentId
-                            )?.name || "Inne";
+                        const sorted = [...first, ...second];
 
-                            if (!grouped[level2Name]) {
-                              grouped[level2Name] = [];
-                            }
+                        const grouped = {};
 
-                            grouped[level2Name].push(cat);
-                          });
+                        sorted.forEach((cat) => {
+                          const level2Name = categories.find(
+                            (c) => c.id === cat.parentId
+                          )?.name || "Inne";
 
-                          return Object.entries(grouped).map(([level2Name, cats]) => (
-                            <optgroup key={level2Name} label={level2Name}>
-                              {cats.map((cat) => (
-                                <option key={cat.id} value={cat.id}>
-                                  {cat.name}
-                                </option>
-                              ))}
-                            </optgroup>
-                          ));
-                                                })()
-                      )}
-                    </select>
-                  )}
+                          if (!grouped[level2Name]) {
+                            grouped[level2Name] = [];
+                          }
 
-                <button
-                  onClick={() => setSelectedTransactions([])}
-                  style={{ marginLeft: "10px" }}
-                >
-                  Anuluj
-                </button>
-                <button
-                  onClick={deleteSelectedTransactions}
-                  style={{ marginLeft: "10px", color: "red" }}
-                >
-                  Usuń zaznaczone
-                </button>
-              </div>
-            )}
+                          grouped[level2Name].push(cat);
+                        });
+
+                        return Object.entries(grouped).map(([level2Name, cats]) => (
+                          <optgroup key={level2Name} label={level2Name}>
+                            {cats.map((cat) => (
+                              <option key={cat.id} value={cat.id}>
+                                {cat.name}
+                              </option>
+                            ))}
+                          </optgroup>
+                        ));
+                      })()
+                    )}
+                  </select>
+                )}
+
+              <button
+                onClick={() => setSelectedTransactions([])}
+                style={{ marginLeft: "10px" }}
+              >
+                Anuluj
+              </button>
+              <button
+                onClick={deleteSelectedTransactions}
+                style={{ marginLeft: "10px", color: "red" }}
+              >
+                Usuń zaznaczone
+              </button>
+            </div>
+          )}
 
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-4 space-y-3">
 
@@ -1517,8 +1534,8 @@ export default function Home() {
                     openLevel3={openLevel3}
                     setOpenLevel3={setOpenLevel3}
 
-                    closeCategory={closeCategory}
-                    reopenCategory={reopenCategory}
+                    closeCategory={(categoryId) => closeCategory(categoryId, monthKey)}
+reopenCategory={(categoryId) => reopenCategory(categoryId, monthKey)}
                     deleteCategory={deleteCategory}
                     renameCategory={renameCategory}
 

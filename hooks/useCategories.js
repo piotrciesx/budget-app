@@ -1,347 +1,401 @@
 import { useState, useMemo, useEffect } from "react";
-
 import { supabase } from "../lib/supabaseClient";
 
 export default function useCategories() {
-    const [categories, setCategories] = useState([]);
+  const [categories, setCategories] = useState([]);
 
-    useEffect(() => {
-  const loadCategories = async () => {
-    const { data, error } = await supabase
-  .from("categories")
-  .select("*")
-  .order("order", { ascending: true });
-
-  console.log("CATEGORIES FROM DB:", data, error);
-
-    if (data && data.length > 0) {
-  const mapped = data.map(c => ({
-    ...c,
-    parentId: c.parent_id
-  }));
-
-  setCategories(mapped);
-}
+  const getCurrentMonthKey = () => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   };
 
-  loadCategories();
-}, []);
+  useEffect(() => {
+    const loadCategories = async () => {
+      const { data, error } = await supabase
+        .from("categories")
+        .select("*")
+        .order("order", { ascending: true });
 
-    const categoriesById = useMemo(() => {
-        return Object.fromEntries(
-            categories.map(c => [c.id, c])
-        );
-    }, [categories]);
+      if (error) {
+        alert("Nie udało się pobrać kategorii.");
+        return;
+      }
 
-    const getChildren = (parentId) =>
+      const mapped = (data || []).map((c) => {
+        let activePeriods = [];
+
+        if (Array.isArray(c.active_periods)) {
+          activePeriods = c.active_periods;
+        } else if (Array.isArray(c.activePeriods)) {
+          activePeriods = c.activePeriods;
+        }
+
+        if (activePeriods.length === 0) {
+          activePeriods = [{ start: "2000-01", end: null }];
+        }
+
+        return {
+          ...c,
+          parentId: c.parent_id ?? c.parentId ?? null,
+          activePeriods,
+        };
+      });
+
+      setCategories(mapped);
+    };
+
+    loadCategories();
+  }, []);
+
+  const categoriesById = useMemo(() => {
+    return Object.fromEntries(categories.map((c) => [c.id, c]));
+  }, [categories]);
+
+  const getChildren = (parentId) =>
     categories.filter((cat) => cat.parentId === parentId);
 
-    const getLowestCategories = () => {
-        return categories.filter((cat) => {
-            const hasChildren = categories.some(
-                (c) => c.parentId === cat.id
-            );
-            return !hasChildren;
-        });
-    };
+  const getLowestCategories = () => {
+    return categories.filter((cat) => {
+      const hasChildren = categories.some((c) => c.parentId === cat.id);
+      return !hasChildren;
+    });
+  };
 
-    const getCategoryLevel = (categoryId) => {
-        let level = 0;
-        let current = categories.find(c => c.id === categoryId);
+  const getCategoryLevel = (categoryId) => {
+    let level = 0;
+    let current = categories.find((c) => c.id === categoryId);
 
-        while (current) {
-            level++;
-            current = categories.find(c => c.id === current.parentId);
-        }
+    while (current) {
+      level++;
+      current = categories.find((c) => c.id === current.parentId);
+    }
 
-        return level; // 1, 2 lub 3
-    };
+    return level;
+  };
 
-    const getAllowedCategories = (currentCategoryId) => {
-        const currentCategory = categories.find(
-            (c) => c.id === currentCategoryId
-        );
+  const getAllowedCategories = (currentCategoryId) => {
+    const currentCategory = categories.find((c) => c.id === currentCategoryId);
+    if (!currentCategory) return [];
 
-        // znajdź Level1
-        const level2 = categories.find(
-            (c) => c.id === currentCategory.parentId
-        );
+    return categories.filter((cat) => {
+      if (cat.id === currentCategoryId) return false;
+      if (cat.type !== currentCategory.type) return false;
+      if (cat.id === "income" || cat.id === "expense") return false;
 
-        const level1 = categories.find(
-            (c) => c.id === level2?.parentId
-        );
+      const hasChildren = categories.some((c) => c.parentId === cat.id);
+      return !hasChildren;
+    });
+  };
 
-        return categories.filter((cat) => {
-            if (cat.id === currentCategoryId) return false;
-            // blokada między income / expense
-            if (cat.type !== currentCategory.type) return false;
+  const renameCategory = async (categoryId) => {
+    const category = categories.find((c) => c.id === categoryId);
+    if (!category) return;
 
-            const hasChildren = categories.some(
-                (c) => c.parentId === cat.id
-            );
+    const { count, error: historyError } = await supabase
+      .from("transactions")
+      .select("id", { count: "exact", head: true })
+      .eq("category_id", categoryId);
 
-            const currentHasChildren = categories.some(
-                (c) => c.parentId === currentCategory.id
-            );
+    if (historyError) {
+      alert("Nie udało się sprawdzić historii kategorii.");
+      return;
+    }
 
-            // 1️⃣ Jeśli jesteśmy w Level3
-            if (!currentHasChildren) {
-                // możemy przejść:
-                // - do innego Level3 w tym samym Level1
-                // - LUB do Level2, który nie ma Level3
-                const catHasChildren = categories.some(
-                    (c) => c.parentId === cat.id
-                );
+    if ((count || 0) > 0) {
+      const confirmRename = window.confirm(
+        "Ta kategoria posiada wpisy historyczne. Zmiana nazwy wpłynie na wszystkie wcześniejsze miesiące. Kontynuować?"
+      );
 
-                if (catHasChildren) return false;
+      if (!confirmRename) return;
+    }
 
-                return true;
-            }
+    const newName = window.prompt("Podaj nową nazwę kategorii:", category.name);
 
-            // 2️⃣ Jeśli jesteśmy w Level2
-            if (currentHasChildren === false) {
-                return true;
-            }
+    if (!newName || !newName.trim()) return;
+    if (newName.trim() === category.name?.trim()) return;
 
-            return true;
-        });
-    };
-
-    const renameCategory = (categoryId) => {
-        const category = categories.find(c => c.id === categoryId);
-        if (!category) return;
-
-        // 🔍 SPRAWDZENIE HISTORII
-        const hasTransactions = transactions.some(
-            t => t.categoryId === categoryId
-        );
-
-        if (hasTransactions) {
-            const confirmRename = window.confirm(
-                "Ta kategoria posiada wpisy historyczne. Zmiana nazwy wpłynie na wszystkie wcześniejsze miesiące. Kontynuować?"
-            );
-
-            if (!confirmRename) return;
-        }
-
-        const newName = window.prompt(
-            "Podaj nową nazwę kategorii:",
-            category.name
-        );
-
-        if (!newName || newName.trim() === "") return;
-
-        setCategories(prev =>
-            prev.map(cat =>
-                cat.id === categoryId
-                    ? { ...cat, name: newName.trim() }
-                    : cat
-            )
-        );
-    };
-
-    const deleteCategory = (categoryId) => {
-
-        // 🚫 blokada Level1
-        if (categoryId === "income" || categoryId === "expense") {
-            alert("Nie można usunąć głównej kategorii systemowej.");
-            return;
-        }
-
-        // 🔹 blokada jeśli ma dzieci
-        const hasChildren = categories.some(
-            cat => cat.parentId === categoryId
-        );
-
-        if (hasChildren) {
-            alert("Nie można usunąć kategorii, ponieważ zawiera podkategorie.");
-            return;
-        }
-
-        // 🔹 blokada jeśli ma historię
-        const hasTransactions = transactions.some(
-            t => t.categoryId === categoryId
-        );
-
-        if (hasTransactions) {
-            alert("Nie można usunąć kategorii, ponieważ ma wpisy historyczne.");
-            return;
-        }
-
-        // 🗑 usunięcie
-        setCategories(prev =>
-            prev.filter(cat => cat.id !== categoryId)
-        );
-    };
-
-    const closeCategory = (categoryId) => {
-        const category = categories.find((c) => c.id === categoryId);
-        if (!category?.activePeriods) return;
-
-        const lastPeriod =
-            category.activePeriods[category.activePeriods.length - 1];
-
-        // 🔍 BLOKADA: przyszłe transakcje
-        const hasFutureTransactions = transactions.some((t) => {
-            return (
-                t.categoryId === categoryId &&
-                t.date > monthKey
-            );
-        });
-
-        if (hasFutureTransactions) {
-            alert(
-                "Nie można zamknąć kategorii, ponieważ posiada wpisy w przyszłych miesiącach."
-            );
-            return;
-        }
-
-        let shouldCloseNow = false;
-
-        // 🔹 Jeśli jest zaplanowane zamknięcie w przyszłości
-        if (lastPeriod?.end && lastPeriod.end > monthKey) {
-            shouldCloseNow = window.confirm(
-                `Ta kategoria ma już zaplanowane zamknięcie w ${lastPeriod.end}.
-  Czy chcesz zamknąć ją wcześniej (${monthKey})?`
-            );
-
-            if (!shouldCloseNow) return;
-        } else {
-            // 🔹 Normalne zamknięcie
-            const confirmClose = window.confirm(
-                `Kategoria będzie widoczna do końca bieżącego miesiąca (${monthKey}). Kontynuować?`
-            );
-
-            if (!confirmClose) return;
-        }
-
-        // 🔹 Aktualizacja activePeriods
-        setCategories((prev) =>
-            prev.map((cat) => {
-                if (cat.id !== categoryId) return cat;
-
-                const updatedPeriods = cat.activePeriods.map((period, index, arr) => {
-                    const isLast = index === arr.length - 1;
-
-                    if (isLast) {
-                        return {
-                            ...period,
-                            end: monthKey,
-                        };
-                    }
-
-                    return period;
-                });
-
-                return {
-                    ...cat,
-                    activePeriods: updatedPeriods,
-                };
-            })
-        );
-    };
-
-    const reopenCategory = (categoryId) => {
-        setCategories((prev) =>
-            prev.map((cat) => {
-                if (cat.id !== categoryId) return cat;
-
-                // 🆕 nowy model
-                if (cat.activePeriods) {
-
-                    // sprawdź czy ostatni okres już jest otwarty
-                    const lastPeriod = cat.activePeriods[cat.activePeriods.length - 1];
-
-                    if (lastPeriod && !lastPeriod.end) {
-                        return cat; // już aktywna
-                    }
-
-                    return {
-                        ...cat,
-                        activePeriods: [
-                            ...cat.activePeriods,
-                            { start: monthKey, end: null }
-                        ]
-                    };
-                }
-
-                // 🔁 fallback dla starego modelu
-                return {
-                    ...cat,
-                    startMonth: monthKey,
-                    endMonth: null,
-                };
-            })
-        );
-    };
-
-    const addCategoryLevel2 = async (name, parentId) => {
-    console.log("ADD LEVEL2 TRIGGERED", name, parentId)
-    if (!name || !name.trim()) return;
-
-    const { data, error } = await supabase
-        .from("categories")
-        .insert([
-            {
-                name: name.trim(),
-                parent_id: parentId,
-                level: 2
-            }
-        ])
-        .select()
-        .single();
+    const { error } = await supabase
+      .from("categories")
+      .update({ name: newName.trim() })
+      .eq("id", categoryId);
 
     if (error) {
-        console.error("ERROR ADDING LEVEL2:", error);
-        return;
+      alert("Nie udało się zmienić nazwy kategorii.");
+      return;
     }
 
-    console.log("LEVEL2 CREATED:", data);
+    setCategories((prev) =>
+      prev.map((cat) =>
+        cat.id === categoryId ? { ...cat, name: newName.trim() } : cat
+      )
+    );
+  };
 
-    setCategories((prev) => [
-    ...prev,
-    {
-        ...data,
-        parentId: data.parent_id
+  const deleteCategory = async (categoryId) => {
+    if (categoryId === "income" || categoryId === "expense") {
+      alert("Nie można usunąć głównej kategorii systemowej.");
+      return;
     }
-]);
+
+    const hasChildren = categories.some((cat) => cat.parentId === categoryId);
+
+    if (hasChildren) {
+      alert("Nie można usunąć kategorii, ponieważ zawiera podkategorie.");
+      return;
+    }
+
+    const { count, error: historyError } = await supabase
+      .from("transactions")
+      .select("id", { count: "exact", head: true })
+      .eq("category_id", categoryId);
+
+    if (historyError) {
+      alert("Nie udało się sprawdzić historii kategorii.");
+      return;
+    }
+
+    if ((count || 0) > 0) {
+      alert("Nie można usunąć kategorii, ponieważ ma wpisy historyczne.");
+      return;
+    }
+
+    const { error } = await supabase
+      .from("categories")
+      .delete()
+      .eq("id", categoryId);
+
+    if (error) {
+      alert("Nie udało się usunąć kategorii.");
+      return;
+    }
+
+    setCategories((prev) => prev.filter((cat) => cat.id !== categoryId));
+  };
+
+  const closeCategory = async (categoryId, targetMonthKey) => {
+  const category = categories.find((c) => c.id === categoryId);
+  if (!category) return;
+
+  const currentMonthKey = targetMonthKey || getCurrentMonthKey();
+
+  const [year, month] = currentMonthKey.split("-");
+  const monthIndex = parseInt(month, 10) - 1;
+
+  let nextMonthIndex = monthIndex + 1;
+  let nextYear = parseInt(year);
+
+  if (nextMonthIndex > 11) {
+    nextMonthIndex = 0;
+    nextYear += 1;
+  }
+
+  const nextMonthKey = `${nextYear}-${String(nextMonthIndex + 1).padStart(2, "0")}`;
+
+  const periods =
+    Array.isArray(category.activePeriods) && category.activePeriods.length > 0
+      ? [...category.activePeriods]
+      : [{ start: "2000-01", end: null }];
+
+  const lastIndex = periods.length - 1;
+  const lastPeriod = periods[lastIndex];
+
+  const confirmed = window.confirm(
+    `Kategoria będzie widoczna do końca miesiąca ${currentMonthKey}. Ukryć od ${nextMonthKey}?`
+  );
+
+  if (!confirmed) return;
+
+  periods[lastIndex] = {
+    ...lastPeriod,
+    end: nextMonthKey,
+  };
+
+  const { error } = await supabase
+    .from("categories")
+    .update({ active_periods: periods })
+    .eq("id", categoryId);
+
+  if (error) {
+    alert("Nie udało się ukryć kategorii.");
+    return;
+  }
+
+  setCategories((prev) =>
+    prev.map((cat) =>
+      cat.id === categoryId ? { ...cat, activePeriods: periods } : cat
+    )
+  );
 };
 
-const addCategoryLevel3 = (parentId, name) => {
+  const reopenCategory = async (categoryId, targetMonthKey) => {
+  const category = categories.find((c) => c.id === categoryId);
+  if (!category) return;
+
+  const effectiveMonthKey = targetMonthKey || getCurrentMonthKey();
+
+  const periods =
+    Array.isArray(category.activePeriods) && category.activePeriods.length > 0
+      ? [...category.activePeriods]
+      : [];
+
+  if (periods.length === 0) {
+    const updatedPeriods = [{ start: effectiveMonthKey, end: null }];
+
+    const { error } = await supabase
+      .from("categories")
+      .update({ active_periods: updatedPeriods })
+      .eq("id", categoryId);
+
+    if (error) {
+      alert("Nie udało się przywrócić kategorii.");
+      return;
+    }
+
+    setCategories((prev) =>
+      prev.map((cat) =>
+        cat.id === categoryId
+          ? { ...cat, activePeriods: updatedPeriods }
+          : cat
+      )
+    );
+    return;
+  }
+
+  const lastIndex = periods.length - 1;
+  const lastPeriod = periods[lastIndex];
+
+  if (!lastPeriod.end) return;
+
+  if (lastPeriod.end >= effectiveMonthKey) {
+    periods[lastIndex] = {
+      ...lastPeriod,
+      end: null,
+    };
+  } else {
+    periods.push({
+      start: effectiveMonthKey,
+      end: null,
+    });
+  }
+
+  const { error } = await supabase
+    .from("categories")
+    .update({ active_periods: periods })
+    .eq("id", categoryId);
+
+  if (error) {
+    alert("Nie udało się przywrócić kategorii.");
+    return;
+  }
+
+  setCategories((prev) =>
+    prev.map((cat) =>
+      cat.id === categoryId ? { ...cat, activePeriods: periods } : cat
+    )
+  );
+};
+
+  const addCategoryLevel2 = async (name, parentId) => {
+    const parentCategory = categories.find((c) => c.id === parentId);
     if (!name || !name.trim()) return;
 
-    const now = new Date();
-    const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    const currentMonthKey = getCurrentMonthKey();
 
-    const parentCategory = categories.find(
-        (cat) => cat.id === parentId
-    );
+    const { data, error } = await supabase
+      .from("categories")
+      .insert([
+        {
+          name: name.trim(),
+          parent_id: parentId,
+          level: 2,
+          type: parentCategory?.type ?? null,
+          active_periods: [{ start: currentMonthKey, end: null }],
+        },
+      ])
+      .select()
+      .single();
 
-    const newCategory = {
-        id: Date.now().toString(),
-        name: name.trim(),
-        parentId,
-        parent_id: parentId,
-        type: parentCategory?.type || "expense",
-        activePeriods: [{ start: currentMonthKey, end: null }],
-    };
+    if (error || !data) {
+      alert("Nie udało się dodać kategorii.");
+      return;
+    }
 
-    setCategories((prev) => [...prev, newCategory]);
-};
+    setCategories((prev) => [
+      ...prev,
+      {
+        ...data,
+        parentId: data.parent_id,
+        activePeriods: Array.isArray(data.active_periods)
+          ? data.active_periods
+          : [{ start: currentMonthKey, end: null }],
+      },
+    ]);
+  };
 
-return {
-  categories,
-  setCategories,
-  categoriesById,
-  getChildren,
-  getLowestCategories,
-  getCategoryLevel,
-  getAllowedCategories,
-  renameCategory,
-  deleteCategory,
-  closeCategory,
-  reopenCategory,
-  addCategoryLevel2,
-  addCategoryLevel3
-};
+  const addCategoryLevel3 = async (parentId, name) => {
+    const parentCategory = categories.find((c) => c.id === parentId);
+    if (!name || !name.trim()) return;
+
+    const currentMonthKey = getCurrentMonthKey();
+
+    const { data, error } = await supabase
+      .from("categories")
+      .insert([
+        {
+          name: name.trim(),
+          parent_id: parentId,
+          level: 3,
+          type: parentCategory?.type ?? null,
+          active_periods: [{ start: currentMonthKey, end: null }],
+        },
+      ])
+      .select()
+      .single();
+
+    if (error || !data) {
+      alert("Nie udało się dodać podkategorii.");
+      return;
+    }
+
+    setCategories((prev) => [
+      ...prev,
+      {
+        ...data,
+        parentId: data.parent_id,
+        activePeriods: Array.isArray(data.active_periods)
+          ? data.active_periods
+          : [{ start: currentMonthKey, end: null }],
+      },
+    ]);
+  };
+
+  return {
+    categories: categories.filter((cat) => {
+  const periods = cat.activePeriods;
+
+  if (!periods || periods.length === 0) return true;
+
+  const now = new Date();
+  const currentKey =
+    now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0");
+
+  return periods.some((p) => {
+    if (currentKey < p.start) return false;
+    if (p.end && currentKey >= p.end) return false;
+    return true;
+  });
+}),
+    setCategories,
+    categoriesById,
+    getChildren,
+    getLowestCategories,
+    getCategoryLevel,
+    getAllowedCategories,
+    renameCategory,
+    deleteCategory,
+    closeCategory,
+    reopenCategory,
+    addCategoryLevel2,
+    addCategoryLevel3,
+  };
 }

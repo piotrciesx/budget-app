@@ -44,65 +44,85 @@ function TransactionRow({
     }
   }, [editingTransactionId, editedAmount, editedDay, editedNote])
 
+  const getDisplayDay = (date) => {
+  if (!date) return "";
+
+  const d = new Date(date);
+  const day = d.getDate();
+
+  if (day === 1) {
+    return "";
+  }
+
+  return day;
+};
+  
   const saveEdit = async () => {
-  const parsedAmount = Number(editedAmount);
-  const currentDate = t.date ? new Date(t.date) : new Date();
-  const currentYear = currentDate.getFullYear();
-  const maxDay = new Date(currentYear, monthIndex + 1, 0).getDate();
-  const parsedDay = Number(editedDay);
+  const parsedAmount = Number(String(editedAmount).replace(",", "."));
 
   if (isNaN(parsedAmount) || parsedAmount <= 0) {
     alert("Kwota musi być większa od zera.");
-    setEditedAmount(t.amount ?? "");
-    setEditedDay(t.date ? new Date(t.date).getDate() : "");
-    setEditedNote(t.description ?? "");
-    setEditingTransactionId(null);
     return;
   }
 
-  if (!isNaN(parsedDay) && (parsedDay < 1 || parsedDay > maxDay)) {
-    alert(`Dzień musi być z zakresu 1-${maxDay}.`);
-    setEditedAmount(t.amount ?? "");
-    setEditedDay(t.date ? new Date(t.date).getDate() : "");
-    setEditedNote(t.description ?? "");
-    setEditingTransactionId(null);
-    return;
+  const baseDate = t.date ? new Date(t.date) : new Date(year, monthIndex, 1);
+  const currentYear = baseDate.getFullYear();
+  const currentMonth = monthIndex ?? baseDate.getMonth();
+  const maxDay = new Date(currentYear, currentMonth + 1, 0).getDate();
+
+  const normalizedDay = String(editedDay ?? "").trim();
+
+  let finalDay;
+
+  if (normalizedDay === "") {
+    finalDay = 1;
+  } else {
+    const parsedDay = Number(normalizedDay);
+
+    if (isNaN(parsedDay) || parsedDay < 1 || parsedDay > maxDay) {
+      alert(`Dzień musi być z zakresu 1-${maxDay}.`);
+      return;
+    }
+
+    finalDay = parsedDay;
   }
 
-  const nextDate = editedDay
-    ? new Date(currentYear, monthIndex, parsedDay, 12).toISOString()
-    : null;
+  const nextDate = new Date(
+    currentYear,
+    currentMonth,
+    finalDay,
+    12
+  ).toISOString();
 
   const { error } = await supabase
     .from("transactions")
     .update({
       amount: parsedAmount,
       description: editedNote,
-      date: nextDate
+      date: nextDate,
     })
     .eq("id", t.id);
 
   if (error) {
-    console.error("BĹ‚Ä…d edycji:", error);
-    alert("Nie udaĹ‚o siÄ™ zapisaÄ‡ zmian.");
+    alert("Nie udało się zapisać zmian.");
     return;
   }
 
-  setTransactions(prev =>
-    prev.map(item =>
+  setTransactions((prev) =>
+    prev.map((item) =>
       item.id === t.id
         ? {
             ...item,
             amount: parsedAmount,
             description: editedNote,
-            date: nextDate
+            date: nextDate,
           }
         : item
     )
   );
 
   setEditingTransactionId(null);
-}
+};
 
   return (
     <div className="flex items-center justify-between text-xs text-gray-500">
@@ -132,7 +152,7 @@ function TransactionRow({
     if (e.key === "Enter") saveEdit()
   }}
   className="border rounded px-1 text-xs w-14"
-  placeholder="dzieĹ„"
+  placeholder="dzień"
 />
 
             <input
@@ -169,7 +189,9 @@ function TransactionRow({
 
               {t.date && (
   <span className="text-[10px] text-gray-400">
-    {new Date(t.date).getDate()}.{monthIndex + 1}
+    {t.date && new Date(t.date).getDate() !== 1 && (
+  `${new Date(t.date).getDate()}.${monthIndex + 1}`
+)}
   </span>
 )}
 
@@ -221,7 +243,11 @@ function TransactionRow({
           onClick={() => {
             setEditingTransactionId(t.id)
             setEditedAmount(t.amount ?? "")
-            setEditedDay(t.date ? new Date(t.date).getDate() : "")
+            setEditedDay(
+  t.date && new Date(t.date).getDate() !== 1
+    ? new Date(t.date).getDate()
+    : ""
+)
             setEditedNote(t.description ?? "")
           }}
           className="text-blue-500"

@@ -47,57 +47,68 @@ export default function useTransactions(user, year, monthIndex) {
   }, [user?.id, year, monthIndex]);
 
   const addExpense = async (categoryId, amount, note = null, day = null) => {
+  if (!amount || amount.trim() === "") {
+    alert("Kwota jest wymagana.");
+    return false;
+  }
 
-    console.log("USER:", user);
+  const cleanedAmount = String(amount).replace(",", ".").trim();
+  const parsedAmount = parseFloat(cleanedAmount);
 
-    if (!amount || amount.trim() === "") {
-      alert("Kwota jest wymagana.");
+  if (isNaN(parsedAmount) || parsedAmount <= 0) {
+    alert("Kwota musi być większa od zera.");
+    return false;
+  }
+
+  const safeYear = year ?? new Date().getFullYear();
+  const safeMonth = monthIndex ?? new Date().getMonth();
+  const normalizedDay = String(day ?? "").trim();
+
+  let effectiveDay = 1;
+
+  if (normalizedDay !== "") {
+    const parsedDay = Number(normalizedDay);
+    const maxDay = new Date(safeYear, safeMonth + 1, 0).getDate();
+
+    if (isNaN(parsedDay) || parsedDay < 1 || parsedDay > maxDay) {
+      alert(`Dzień musi być z zakresu 1-${maxDay}.`);
       return false;
     }
 
-    const cleaned = amount.replace(",", ".").trim();
-    const parsedAmount = parseFloat(cleaned);
+    effectiveDay = parsedDay;
+  }
 
-    if (isNaN(parsedAmount) || parsedAmount <= 0) {
-  alert("Kwota musi być większa od zera.");
-  return false;
-}
-    const safeYear = year ?? new Date().getFullYear();
-const safeMonth = monthIndex ?? new Date().getMonth();
-const safeDay = !isNaN(parseInt(day)) ? parseInt(day) : 1;
+  const newDate = new Date(safeYear, safeMonth, effectiveDay, 12).toISOString();
 
-const newDate = new Date(safeYear, safeMonth, safeDay, 12).toISOString();
-    
-    const { data, error } = await supabase
-      .from("transactions")
-      .insert([
-        {
-          user_id: user.id,
-          category_id: categoryId,
-          amount: parsedAmount,
-          description: note,
-          date: newDate
-        }
-      ])
-      .select()
-      .single();
-
-    if (error) {
-      console.error("Błąd zapisu transakcji:", JSON.stringify(error, null, 2));
-      alert("Nie udało się zapisać transakcji.");
-      return false;
-    }
-
-    setTransactions(prev => [
-      ...prev,
+  const { data, error } = await supabase
+    .from("transactions")
+    .insert([
       {
-  ...data,
-  categoryId: data.category_id
-}
-    ]);
+        user_id: user.id,
+        category_id: categoryId,
+        amount: parsedAmount,
+        description: note,
+        date: newDate,
+      },
+    ])
+    .select()
+    .single();
 
-    return true;
-  };
+  if (error || !data) {
+    alert("Nie udało się zapisać transakcji.");
+    return false;
+  }
+
+  setTransactions((prev) => [
+    ...prev,
+    {
+      ...data,
+      categoryId: data.category_id,
+    },
+  ]);
+
+  return true;
+};
 
     const moveTransaction = (transactionId, newCategoryId) => {
     setTransactions(prev =>
@@ -138,12 +149,6 @@ const newDate = new Date(safeYear, safeMonth, safeDay, 12).toISOString();
   };
 
   const clearMonth = async () => {
-
-    const confirmDelete = window.confirm(
-      "Usunąć wszystkie transakcje z tego miesiąca?"
-    );
-
-    if (!confirmDelete) return;
 
     const startOfMonth = new Date(year, monthIndex, 1);
     const endOfMonth = new Date(year, monthIndex + 1, 1);

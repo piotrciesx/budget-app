@@ -188,14 +188,9 @@ export default function Level1Block({
                                 )}
                                 <AddCategoryForm
     placeholder="Nowa sekcja..."
-    onAdd={(name) => {
-        if (level1.type === "income") {
-            addCategoryLevel2Income(name, level1.id);
-        } else {
-            addCategoryLevel2(name, level1.id);
-        }
-    }}
+    onAdd={(name) => addCategoryLevel2(name, level1.id)}
 />
+
                                 {!hasLevel2 && (
                                     <Level2AddForm
                                         categoryId={level1.id}
@@ -338,19 +333,26 @@ export default function Level1Block({
                                                                         maxDay={getMaxDaysInMonth(year, monthIndex)}
                                                                     />
                                                                 )}
-                                                                {transactions
-                                                                    .filter(
-                                                                        (t) =>
-                                                                            t.categoryId === level2.id &&
-                                                                            t.date === monthKey
-                                                                    )
-                                                                    .sort((a, b) => {
-                                                                        if (a.day && b.day) return a.day - b.day
-                                                                        if (a.day && !b.day) return -1
-                                                                        if (!a.day && b.day) return 1
-                                                                        return 0
-                                                                    })
-                                                                    .map((t) => (
+                                                               {transactions
+    .filter((t) => {
+        const transactionMonth = t.created_at?.slice(0, 7);
+
+        return (
+            (t.categoryId === level2.id || t.category_id === level2.id) &&
+            transactionMonth === `${year}-${String(monthIndex + 1).padStart(2, "0")}`
+        );
+    })
+
+
+    .sort((a, b) => {
+        if (a.day && b.day) return a.day - b.day
+        if (a.day && !b.day) return -1
+        if (!a.day && b.day) return 1
+        return 0
+    })
+    .map((t) => (
+
+
                                                                         <TransactionRow
                                                                             key={t.id}
                                                                             t={t}
@@ -456,7 +458,7 @@ export default function Level1Block({
                                                                                                 {level3.name} — {formatAmount(getCategorySum(level3.id, transactions, categories, monthKey))} zł
                                                                                             </button>
 
-                                                                                            {isCategoryActiveInMonth(level3, monthKey) ? (
+                                                                                            {isCategoryActiveInMonth(level3, year, monthIndex) ? (
                                                                                                 <button
                                                                                                     onClick={(e) => {
                                                                                                         e.stopPropagation();
@@ -587,12 +589,18 @@ export default function Level1Block({
                                                                     })}
                                                                 </SortableContext>
                                                                 {(() => {
-                                                                    const archivedLevel3 = categories.filter(
-                                                                        (cat) =>
-                                                                            cat.parentId === level2.id &&
-                                                                            cat.activePeriods &&
-                                                                            !isCategoryActiveInMonth(cat, monthKey)
-                                                                    );
+                                                                    const archivedLevel3 = categories.filter((cat) => {
+    if (cat.parentId !== level2.id) return false
+    if (!cat.activePeriods) return false
+
+    const isActive = isCategoryActiveInMonth(cat, year, monthIndex)
+
+    const lastPeriod = cat.activePeriods?.[cat.activePeriods.length - 1]
+
+    if (!lastPeriod || !lastPeriod.end) return false
+
+    return !isActive && lastPeriod.end <= monthKey
+})
 
                                                                     if (archivedLevel3.length === 0) return null;
 
@@ -641,12 +649,25 @@ export default function Level1Block({
                                 </SortableContext>
                                 {/* ===== ARCHIWALNE LEVEL2 ===== */}
                                 {(() => {
-                                    const archived = categories.filter(
-                                        (cat) =>
-                                            cat.parentId === level1.id &&
-                                            cat.activePeriods &&
-                                            !isCategoryActiveInMonth(cat, monthKey)
-                                    );
+                                    const archived = categories.filter((cat) => {
+    if (cat.parentId !== level1.id) return false
+    if (!cat.activePeriods) return false
+
+    const isActive = isCategoryActiveInMonth(cat, year, monthIndex)
+
+    const lastPeriod = cat.activePeriods?.[cat.activePeriods.length - 1]
+
+    if (!lastPeriod || !lastPeriod.end) return false
+
+    const [endYear, endMonth] = lastPeriod.end.split("-").map(Number)
+    const endMonthIndex = endMonth - 1
+
+    const alreadyClosed =
+        year > endYear ||
+        (year === endYear && monthIndex >= endMonthIndex)
+
+    return !isActive && alreadyClosed
+})
 
                                     if (archived.length === 0) return null;
 
